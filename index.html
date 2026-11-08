@@ -455,6 +455,8 @@
   .pv-tabs button[aria-selected="true"] { background: var(--ink); color: var(--chrome-fg); font-weight: 700; }
   #pj-pv .inp:disabled, #pj-pv .li input:disabled, #pj-pv textarea:disabled { opacity: 1; -webkit-text-fill-color: var(--ink-2); }
   #pj-pv .rform { padding-top: 14px; }
+  .fcard .check { display: flex; align-items: center; gap: 10px; margin: -2px 0 12px; font-size: 15px; cursor: pointer; }
+  .fcard .check input { width: 22px; height: 22px; accent-color: var(--ink); flex: none; }
 </style>
 </head>
 <body>
@@ -807,8 +809,10 @@ function blankData(p, profile) {
   return d;
 }
 /** 名單至少保留設定的空格數 */
+const canAdd = f => f.more !== false; // 填寫者可以「再加一格」（預設可以）
 function padList(f, list) {
-  const it = listItems(list).map(x => ({ n: x.n, t: [...(x.t || [])] }));
+  let it = listItems(list).map(x => ({ n: x.n, t: [...(x.t || [])] }));
+  if (!canAdd(f)) it = it.slice(0, +f.slots || 1);
   while (it.length < (+f.slots || 1)) it.push({ n: '', t: [] });
   return it;
 }
@@ -879,7 +883,7 @@ function drawFields() {
         ${tags.length ? `<p class="legend">${tags.map(esc).join('／')}（可複選）</p>` : ''}
         ${d[f.id].map((x, i) => `<div class="li"><span class="no">${i + 1}.</span><input data-list="${f.id}" data-i="${i}" value="${esc(x.n)}" maxlength="20" aria-label="${esc(f.label)} 第 ${i + 1} 位">
           ${tags.length ? `<span class="tagset">${tags.map(tg => `<button type="button" data-tag="${f.id}" data-i="${i}" data-t="${esc(tg)}" aria-pressed="${(x.t || []).includes(tg)}" title="${esc(tg)}">${esc(tagCode(tg))}</button>`).join('')}</span>` : '<span></span>'}</div>`).join('')}
-        <button type="button" class="add-slot" data-add="${f.id}">＋ 再加一格</button></div>`;
+        ${canAdd(f) ? `<button type="button" class="add-slot" data-add="${f.id}">＋ 再加一格</button>` : ''}</div>`;
     } else if (f.type === 'text') {
       html += `<div class="group"><label class="field"><span style="font-weight:700;color:var(--ink);font-size:15px">${esc(f.label)}</span><textarea class="inp" data-text="${f.id}" maxlength="1000" rows="4">${esc(d[f.id])}</textarea></label></div>`;
     } else if (f.type === 'photo') {
@@ -946,7 +950,7 @@ function cleanData(p, d) {
   const out = {};
   p.fields.forEach(f => {
     const v = d[f.id];
-    if (f.type === 'list') out[f.id] = listItems(v).map(x => ({ n: String(x.n).trim(), t: (x.t || []).filter(t => (f.tags || []).includes(t)) }));
+    if (f.type === 'list') out[f.id] = listItems(v).slice(0, canAdd(f) ? 60 : (+f.slots || 1)).map(x => ({ n: String(x.n).trim(), t: (x.t || []).filter(t => (f.tags || []).includes(t)) }));
     else if (f.type === 'number') out[f.id] = String(v).trim() === '' ? '' : Math.max(0, Number(v) || 0);
     else if (f.type === 'photo') out[f.id] = (v || []).slice(0, MAX_PHOTOS);
     else out[f.id] = String(v || '').trim();
@@ -1155,7 +1159,7 @@ function editProject(p) {
       <label class="field"><span>截止：該週結束後的週一幾點</span><input class="inp" type="time" id="pj-due" value="${esc(PD.dueTime)}" style="max-width:12em"></label>
       <p class="help" style="font-size:12px;color:var(--ink-2);margin:0">時間到了會寄 Email 給管理員，信裡有連結，點一下就能把提醒卡貼到群組。</p></div>
     <div class="group"><h2>圖卡色調</h2><div class="tones" role="radiogroup">${Object.entries(THEMES).map(([k, t]) => `<button type="button" role="radio" aria-checked="${PD.theme === k}" data-theme="${k}" style="--sw:${t.btn};--sw2:${t.notch}"><i></i>${t.name}</button>`).join('')}</div></div>
-    <div class="group"><h2>回報欄位</h2><p style="font-size:13px;color:var(--ink-2);margin:-4px 0 10px">照順序顯示在填寫頁和群組圖卡上。名單可以設定預設幾格（填的人還能再加），和可複選的代號。</p>
+    <div class="group"><h2>回報欄位</h2><p style="font-size:13px;color:var(--ink-2);margin:-4px 0 10px">照順序顯示在填寫頁和群組圖卡上。名單可以設定格數、是否開放填寫者再加一格，和可複選的代號。</p>
       <div id="pj-fields"></div>
       <div class="add-field">${Object.entries(FIELD_TYPES).map(([k, v]) => `<button type="button" class="chip" data-addf="${k}">＋ ${v}</button>`).join('')}</div>
       <a class="mydata-link" href="#pj-pv-wrap" id="to-pv" style="margin-top:6px">↑ 回到上面看預覽</a></div>
@@ -1171,7 +1175,7 @@ function editProject(p) {
   $$('[data-theme]').forEach(b => b.onclick = () => { PD.theme = b.dataset.theme; $$('[data-theme]').forEach(x => x.setAttribute('aria-checked', x === b)); drawPreview(); });
   $$('[data-addf]').forEach(b => b.onclick = () => {
     const type = b.dataset.addf;
-    PD.fields.push({ id: newId(), type, label: '', slots: type === 'list' ? 3 : undefined, tags: type === 'list' ? [] : undefined });
+    PD.fields.push({ id: newId(), type, label: '', slots: type === 'list' ? 3 : undefined, tags: type === 'list' ? [] : undefined, more: type === 'list' ? true : undefined });
     drawFieldEditor(); const ins = $$('[data-flabel]'); ins[ins.length - 1].focus();
   });
   if ($('pj-open')) $('pj-open').onclick = async () => {
@@ -1205,9 +1209,9 @@ function formPreview(p, wk) {
     if (f.type === 'number') h += `<div class="group"><label class="field">${lab(f.label)}<input class="inp num" disabled placeholder="0"></label></div>`;
     else if (f.type === 'list') {
       const tags = f.tags || [];
-      h += `<div class="group"><h2>${esc(f.label)}<small>預設 ${+f.slots || 1} 格</small></h2>${tags.length ? `<p class="legend">${tags.map(esc).join('／')}（可複選）</p>` : ''}
+      h += `<div class="group"><h2>${esc(f.label)}<small>${canAdd(f) ? `預設 ${+f.slots || 1} 格，可再加` : `固定 ${+f.slots || 1} 格`}</small></h2>${tags.length ? `<p class="legend">${tags.map(esc).join('／')}（可複選）</p>` : ''}
         ${Array.from({ length: Math.min(+f.slots || 1, 30) }, (_, i) => `<div class="li"><span class="no">${i + 1}.</span><input disabled>${tags.length ? `<span class="tagset">${tags.map(t => `<button type="button" tabindex="-1" aria-pressed="false">${esc(tagCode(t))}</button>`).join('')}</span>` : '<span></span>'}</div>`).join('')}
-        <div class="add-slot" style="text-align:center">＋ 再加一格</div></div>`;
+        ${canAdd(f) ? '<div class="add-slot" style="text-align:center">＋ 再加一格</div>' : ''}</div>`;
     } else if (f.type === 'text') h += `<div class="group"><label class="field">${lab(f.label)}<textarea class="inp" disabled rows="2"></textarea></label></div>`;
     else if (f.type === 'photo') h += `<div class="group"><h2>${esc(f.label)}<small>最多 ${MAX_PHOTOS} 張</small></h2><span class="btn plain small">上傳照片</span></div>`;
   });
@@ -1226,7 +1230,8 @@ function drawFieldEditor() {
       <span class="ctl"><button type="button" data-up="${i}" aria-label="上移" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" data-down="${i}" aria-label="下移" ${i === PD.fields.length - 1 ? 'disabled' : ''}>↓</button><button type="button" data-delf="${i}" aria-label="刪除欄位">刪除</button></span></div>
     <label class="field"><span>欄位名稱</span><input class="inp" data-flabel="${i}" value="${esc(f.label)}" placeholder="例如 青少年家聚會數" maxlength="30"></label>
     <label class="field"><span>類型</span><select class="inp" data-ftype="${i}">${Object.entries(FIELD_TYPES).map(([k, v]) => `<option value="${k}" ${f.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
-    ${f.type === 'list' ? `<label class="field"><span>預設幾格（可下拉選或直接打數字）</span><input class="inp" type="number" inputmode="numeric" min="1" max="30" list="slot-opts" data-slots="${i}" value="${+f.slots || 1}" style="max-width:9em"></label>
+    ${f.type === 'list' ? `<label class="field"><span>格數（可下拉選或直接打數字）</span><input class="inp" type="number" inputmode="numeric" min="1" max="30" list="slot-opts" data-slots="${i}" value="${+f.slots || 1}" style="max-width:9em"></label>
+      <label class="check"><input type="checkbox" data-more="${i}" ${canAdd(f) ? 'checked' : ''}><span>開放填寫者「再加一格」</span></label>
       <label class="field"><span>代號（選填，可複選）</span><input class="inp" data-tags="${i}" value="${esc((f.tags || []).join('/'))}" placeholder="例如 A追求/B禱告/C出訪"></label>
       <p class="hint">代號用「/」分開；名單上只顯示第一個字母，例如「甘樂與A」。</p>` : ''}
     ${f.type === 'info' ? '<p class="hint">每個人填一次就記住，下週自動帶入，例如專區、校園。</p>' : ''}
@@ -1234,6 +1239,7 @@ function drawFieldEditor() {
   const F = i => PD.fields[+i];
   $$('[data-ftype]').forEach(el => el.onchange = () => { const f = F(el.dataset.ftype); f.type = el.value; if (f.type === 'list') { f.slots = f.slots || 3; f.tags = f.tags || []; } drawFieldEditor(); });
   $$('[data-flabel]').forEach(el => el.oninput = () => { F(el.dataset.flabel).label = el.value; drawPreview(); });
+  $$('[data-more]').forEach(el => el.onchange = () => { F(el.dataset.more).more = el.checked; drawPreview(); });
   $$('[data-slots]').forEach(el => el.oninput = () => { F(el.dataset.slots).slots = Math.min(30, Math.max(1, parseInt(el.value, 10) || 1)); drawPreview(); });
   $$('[data-tags]').forEach(el => el.oninput = () => { F(el.dataset.tags).tags = el.value.split(/[\/／,，、]/).map(s => s.trim()).filter(Boolean).slice(0, 6); drawPreview(); });
   drawPreview();

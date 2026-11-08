@@ -198,6 +198,7 @@ function cleanFields(list) {
     const out = { id, type, label: str(f && f.label, 30) };
     if (type === 'list') {
       out.slots = Math.min(30, Math.max(1, parseInt(f.slots, 10) || 1));
+      out.more = f.more !== false; // 填寫者可以再加一格
       out.tags = (Array.isArray(f.tags) ? f.tags : []).map(t => str(t, 12)).filter(Boolean).slice(0, 6);
     }
     return out;
@@ -290,7 +291,7 @@ function cleanData(p, data) {
   const out = {};
   p.fields.forEach(f => {
     const v = data[f.id];
-    if (f.type === 'list') out[f.id] = listItems(v).slice(0, 60).map(x => ({ n: str(x.n, 20), t: (Array.isArray(x.t) ? x.t : []).filter(t => (f.tags || []).indexOf(t) >= 0) }));
+    if (f.type === 'list') out[f.id] = listItems(v).slice(0, f.more === false ? f.slots : 60).map(x => ({ n: str(x.n, 20), t: (Array.isArray(x.t) ? x.t : []).filter(t => (f.tags || []).indexOf(t) >= 0) }));
     else if (f.type === 'number') out[f.id] = String(v == null ? '' : v).trim() === '' ? '' : Math.max(0, Number(v) || 0);
     else if (f.type === 'photo') out[f.id] = (Array.isArray(v) ? v : []).filter(u => /^https:\/\/lh3\.googleusercontent\.com\//.test(u)).slice(0, 4);
     else if (f.type === 'text') out[f.id] = str(v, 1000);

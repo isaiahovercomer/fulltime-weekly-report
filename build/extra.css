@@ -107,3 +107,5 @@
   .pv-tabs button[aria-selected="true"] { background: var(--ink); color: var(--chrome-fg); font-weight: 700; }
   #pj-pv .inp:disabled, #pj-pv .li input:disabled, #pj-pv textarea:disabled { opacity: 1; -webkit-text-fill-color: var(--ink-2); }
   #pj-pv .rform { padding-top: 14px; }
+  .fcard .check { display: flex; align-items: center; gap: 10px; margin: -2px 0 12px; font-size: 15px; cursor: pointer; }
+  .fcard .check input { width: 22px; height: 22px; accent-color: var(--ink); flex: none; }
