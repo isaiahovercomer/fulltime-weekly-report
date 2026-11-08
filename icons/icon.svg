@@ -1,14 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- 活動登記圖示：海軍藍底、米白票券、金色票根、打勾＝登記完成 -->
-  <rect width="512" height="512" fill="#2F3343"/>
-  <g>
-    <!-- 票券本體 -->
-    <path d="M124 150h264a28 28 0 0 1 28 28v56a22 22 0 0 0 0 44v56a28 28 0 0 1-28 28H124a28 28 0 0 1-28-28v-56a22 22 0 0 0 0-44v-56a28 28 0 0 1 28-28z" fill="#FAF6EE"/>
-    <!-- 金色票根 -->
-    <path d="M326 150h62a28 28 0 0 1 28 28v56a22 22 0 0 0 0 44v56a28 28 0 0 1-28 28h-62z" fill="#C49356"/>
-    <!-- 撕線 -->
-    <line x1="326" y1="170" x2="326" y2="342" stroke="#FAF6EE" stroke-width="6" stroke-dasharray="12 10" stroke-linecap="round"/>
-    <!-- 打勾 -->
-    <path d="M152 258l40 40 82-90" fill="none" stroke="#2F3343" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 全時間工作重點回報圖示：海軍藍底、米白回報板、金色夾子、一週七格＋往上長的長條＝每週回報與統計 -->
+  <rect width="512" height="512" rx="112" fill="#2F3343"/>
+  <g transform="translate(256 262) scale(1.08) translate(-256 -256)">
+  <!-- 回報板 -->
+  <rect x="116" y="104" width="280" height="324" rx="30" fill="#FAF6EE"/>
+  <!-- 金色夾子 -->
+  <path d="M206 82h100a18 18 0 0 1 18 18v34a14 14 0 0 1-14 14H202a14 14 0 0 1-14-14v-34a18 18 0 0 1 18-18z" fill="#C49356"/>
+  <circle cx="256" cy="108" r="11" fill="#2F3343"/>
+  <!-- 一週七格：前六格已填，最後一格是本週 -->
+  <g fill="#2F3343">
+    <rect x="142" y="176" width="24" height="24" rx="6"/>
+    <rect x="176" y="176" width="24" height="24" rx="6"/>
+    <rect x="210" y="176" width="24" height="24" rx="6"/>
+    <rect x="244" y="176" width="24" height="24" rx="6"/>
+    <rect x="278" y="176" width="24" height="24" rx="6"/>
+    <rect x="312" y="176" width="24" height="24" rx="6"/>
+  </g>
+  <rect x="346" y="176" width="24" height="24" rx="6" fill="#B03A2E"/>
+  <!-- 往上長的長條 -->
+  <g fill="#C49356">
+    <rect x="158" y="318" width="44" height="74" rx="8"/>
+    <rect x="234" y="282" width="44" height="110" rx="8"/>
+  </g>
+  <rect x="310" y="240" width="44" height="152" rx="8" fill="#2F3343"/>
   </g>
 </svg>
