@@ -1171,7 +1171,7 @@ function editProject(p) {
   drawFieldEditor();
   $$('[data-pv]').forEach(b => b.onclick = () => { PV = b.dataset.pv; $$('[data-pv]').forEach(x => x.setAttribute('aria-selected', x === b)); drawPreview(); });
   ['pj-title', 'pj-desc', 'pj-due'].forEach(id => $(id).addEventListener('input', () => { PD.title = $('pj-title').value; PD.desc = $('pj-desc').value; PD.dueTime = $('pj-due').value || '12:00'; drawPreview(); }));
-  $('back').onclick = () => isNew ? renderHome() : openProject(p.id, 'settings');
+  $('back').onclick = () => isNew ? renderHome() : openProject(p.id, 'week');
   $$('[data-theme]').forEach(b => b.onclick = () => { PD.theme = b.dataset.theme; $$('[data-theme]').forEach(x => x.setAttribute('aria-checked', x === b)); drawPreview(); });
   $$('[data-addf]').forEach(b => b.onclick = () => {
     const type = b.dataset.addf;
@@ -1180,7 +1180,7 @@ function editProject(p) {
   });
   if ($('pj-open')) $('pj-open').onclick = async () => {
     const r = await api('setOpen', { projectId: p.id, open: !PD.open }); toast(r.project.open ? '已重新開放回報' : '已停止回報');
-    await reloadProjects(); openProject(p.id, 'settings');
+    await reloadProjects(); openProject(p.id, 'week');
   };
   if ($('pj-del')) $('pj-del').onclick = () => armThen($('pj-del'), '確定刪除？所有回報都會刪除，再按一次', async () => {
     await api('deleteProject', { projectId: p.id }); toast('已刪除'); await reloadProjects(); TAB = 'admin'; renderHome();
@@ -1266,7 +1266,7 @@ async function saveProject(isNew, old) {
     const r = isNew ? await api('createProject', { project: proj }) : await api('updateProject', { projectId: old.id, project: proj });
     toast(isNew ? '已建立，可以把填寫連結或提醒卡發到群組' : '已儲存');
     await reloadProjects();
-    openProject(r.project.id, isNew ? 'week' : 'settings');
+    openProject(r.project.id, 'week');
   } catch (e) { toast(e.message); btn.disabled = false; btn.textContent = label; }
 }
 
@@ -1295,11 +1295,12 @@ function renderProject() {
     </nav>
     <div id="ppanel"></div>`);
   $('back').onclick = () => { TAB = 'admin'; renderHome(); };
-  $$('[data-ptab]').forEach(b => b.onclick = () => { PTAB = b.dataset.ptab; renderProject(); });
+  // 「設定」直接打開編輯頁；編輯頁按返回或儲存後回到項目的「每週」
+  $$('[data-ptab]').forEach(b => b.onclick = () => { if (b.dataset.ptab === 'settings') return editProject(S.project); PTAB = b.dataset.ptab; renderProject(); });
   if (PTAB === 'week') renderWeekTab();
   else if (PTAB === 'agg') renderAggTab();
   else if (PTAB === 'members') renderMembersTab();
-  else editProjectInline();
+  else { PTAB = 'week'; renderWeekTab(); }
 }
 
 const weekReps = wk => S.reports.filter(r => r.week === wk).sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hant'));
