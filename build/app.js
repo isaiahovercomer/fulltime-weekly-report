@@ -1,6 +1,6 @@
 /* ======== 只需要改這兩行 ======== */
 const LIFF_ID = '2012412693-oJoL0N7l';
-const GAS_URL = '請填入 Apps Script 網址';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycby0_P6aL5zURgr1j8a9aPbcSqda-2t5mvRTO0YQwj2ACHe-QIybW18Uy8bLx78DmQf8iQ/exec';
 /* ================================ */
 
 let PARAMS = new URLSearchParams(location.search);
