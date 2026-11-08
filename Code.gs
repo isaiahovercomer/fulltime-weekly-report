@@ -58,6 +58,7 @@ function doPost(e) {
       case 'submit':        out = { ok: true, ...submit(user, req.projectId, req.week, req.data) }; break;
       case 'myReports':     out = { ok: true, project: getProject(req.projectId), reports: reportsOf(req.projectId).filter(r => r.userId === user.userId).sort(byWeekDesc) }; break;
       case 'weekReports':   out = { ok: true, project: getProject(req.projectId), week: req.week, reports: reportsOf(req.projectId).filter(r => r.week === req.week) }; break;
+      case 'deleteReport':  out = { ok: true, ...deleteReport(user, req.reportId) }; break;
       case 'uploadImage':   out = { ok: true, url: uploadImage(user, req.data, req.mime) }; break;
       case 'myData':        out = { ok: true, ...myData(user) }; break;
       case 'deleteMyData':  out = { ok: true, ...deleteMyData(user) }; break;
@@ -362,6 +363,20 @@ function projectStats(pid) {
   return { project: p, weeks: weeksOf(p), defaultWeek: defaultWeek(p),
     members: memberIds(pid).filter(u => people[u]).map(u => ({ userId: u, name: people[u].name, info: people[u].info })),
     reports: reportsOf(pid) };
+}
+
+/** 刪除一則回報：本人或管理員 */
+function deleteReport(user, id) {
+  return withLock(() => {
+    const sh = sheet(SH.REPORTS), data = sh.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][RP.ID]) !== String(id)) continue;
+      if (String(data[i][RP.UID]) !== user.userId && !isAdmin(user.userId)) throw new Error('只能刪除自己的回報');
+      sh.deleteRow(i + 1);
+      return { week: ymdOf(data[i][RP.WEEK]) };
+    }
+    throw new Error('找不到這則回報，可能已經刪除了');
+  });
 }
 
 /* ---------- 照片 ---------- */

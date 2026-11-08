@@ -239,6 +239,7 @@ async function demoApi(action, d) {
     case 'removeMember': demo.members[d.projectId] = demo.members[d.projectId].filter(u => u !== d.userId); return { ok: true, ...statsOf(P(d.projectId)) };
     case 'uploadImage': return { ok: true, url: d.data };
     case 'myData': return { ok: true, found: !!demo.people[me], name: prof().name, info: prof().info, lineName: '簡晨光 Isaiah Chien', reports: demo.reports.filter(r => r.userId === me).length, projects: 1 };
+    case 'deleteReport': { const r = demo.reports.find(x => x.id === d.reportId); if (!r) throw new Error('找不到這則回報'); if (r.userId !== me && !demo.me.isAdmin) throw new Error('只能刪除自己的回報'); demo.reports = demo.reports.filter(x => x !== r); return { ok: true, week: r.week }; }
     case 'deleteMyData': return { ok: true, reports: demo.reports.filter(r => r.userId === me).length };
   }
   throw new Error('預覽模式不支援：' + action);
@@ -280,6 +281,7 @@ async function main() {
       if (liff.isLoggedIn() && !getSession()) { try { setSession(await api('session')); } catch (e) {} }
     }
     if (PARAMS.has('mydata')) return myDataFlow();
+    if (PARAMS.get('fwd')) return forwardFlow(PARAMS.get('fwd'), PARAMS.get('p'), PARAMS.get('w'), PARAMS.get('r'));
     ME = await api('me');
     const pid = PARAMS.get('p');
     if (pid || ['report', 'first', 'done'].includes(DEMO_MODE)) return reportFlow(pid || 'P1', PARAMS.get('w'));
@@ -379,9 +381,11 @@ function reportForm() {
       <div id="fields"></div>
     </form>
     <div class="dock"><div class="inner"><button class="btn send" id="submit">${R.mine ? '儲存修改並發到群組' : '送出回報'}</button></div></div>
+    ${R.mine ? `<button class="btn cancel" id="del-mine" style="margin-top:16px">刪除這週的回報</button>` : ''}
     <footer class="page-foot"><a class="mydata-link" href="#" id="my-hist">我的回報紀錄</a><a class="mydata-link" href="#" id="week-all">本週大家的回報</a>${myDataLinkInline()}</footer>
   </section>`);
   drawFields();
+  if ($('del-mine')) $('del-mine').onclick = () => deleteMine($('del-mine'), R.mine);
   $('wk').onchange = () => reportFlow(p.id, $('wk').value);
   if ($('carry')) $('carry').onclick = () => {
     p.fields.forEach(f => { if (f.type === 'list' && listItems(R.last.data[f.id]).length) R.data[f.id] = padList(f, R.last.data[f.id]); });
@@ -511,8 +515,10 @@ function resultView(rep, justSent, updated, extra = {}) {
     <button class="btn send" style="margin-top:18px" id="post-again">發到群組</button>
     <div class="btn-row"><button class="btn plain" id="copy">複製成文字</button><button class="btn plain" id="edit">修改回報</button></div>
     ${liff.isInClient() ? `<button class="btn plain" style="margin-top:10px" onclick="liff.closeWindow()">回到聊天室</button>` : ''}
+    <button class="btn cancel" id="del-mine" style="margin-top:10px">刪除這週的回報</button>
     <footer class="page-foot"><a class="mydata-link" href="#" id="my-hist">我的回報紀錄</a><a class="mydata-link" href="#" id="week-all">本週大家的回報</a></footer>
   </section>`);
+  $('del-mine').onclick = () => deleteMine($('del-mine'), rep);
   $('copy').onclick = () => copyText(reportText(p, rep), '已複製，可以貼到任何地方');
   $('edit').onclick = () => { R.mine = rep; R.week = rep.week; reportForm(); };
   $('my-hist').onclick = e => { e.preventDefault(); historyFlow(p.id); };
@@ -568,7 +574,7 @@ async function historyFlow(pid) {
     <p class="summary">${esc(p.title)}・共 ${r.reports.length} 週</p>
     ${r.reports.length ? r.reports.map((x, i) => repCard(p, x, i === 0, true)).join('') : '<p class="empty">還沒有回報紀錄。</p>'}`);
   $('back').onclick = () => reportFlow(pid, R && R.week);
-  bindRepCards(p, r.reports);
+  bindRepCards(p, r.reports, () => historyFlow(pid));
 }
 
 /** 本週大家的回報（每週的文字大家都看得到） */
@@ -580,19 +586,36 @@ async function weekAllFlow(pid, wk) {
     <p class="summary">${esc(p.title)}・${r.reports.length} 人已回報</p>
     ${r.reports.length ? r.reports.map(x => repCard(p, x, false, false)).join('') : '<p class="empty">這週還沒有人回報。</p>'}`);
   $('back').onclick = () => reportFlow(pid, wk);
-  bindRepCards(p, r.reports);
+  bindRepCards(p, r.reports, () => weekAllFlow(pid, wk));
 }
 
-/** 一則回報（可展開） */
+/** 刪除自己這週的回報：按兩次確認；群組裡已經貼出的圖卡無法收回 */
+function deleteMine(btn, rep) {
+  armThen(btn, '確定刪除？群組裡的圖卡無法收回，再按一次', async () => {
+    await api('deleteReport', { reportId: rep.id });
+    toast(`已刪除 ${weekLabel(rep.week)} 的回報`);
+    R.mine = null;
+    reportFlow(R.project.id, rep.week);
+  });
+}
+const canDelete = x => ME && (x.userId === ME.userId || ME.isAdmin);
+
+/** 一則回報（可展開）；自己的回報或管理員可以刪除 */
 function repCard(p, x, open, showWeek) {
   return `<details class="rep" ${open ? 'open' : ''}>
     <summary><span class="nm">${showWeek ? weekLabel(x.week) : esc(x.name)}${x.late ? '<span class="late">逾期</span>' : ''}</span><span class="mt">${esc(x.time || '')}</span></summary>
     <div class="body"><pre class="rtext">${esc(reportText(p, x))}</pre>${photosHtml(p, x)}
-      <div class="rep-acts"><button class="btn plain small" data-copy="${esc(x.id)}">複製文字</button></div></div>
+      <div class="rep-acts"><button class="btn plain small" data-copy="${esc(x.id)}">複製文字</button>${canDelete(x) ? `<button class="btn cancel small" data-delrep="${esc(x.id)}">刪除</button>` : ''}</div></div>
   </details>`;
 }
-function bindRepCards(p, list) {
+function bindRepCards(p, list, after) {
   $$('[data-copy]').forEach(b => b.onclick = () => { const x = list.find(y => y.id === b.dataset.copy); copyText(reportText(p, x), '已複製'); });
+  $$('[data-delrep]').forEach(b => b.onclick = () => armThen(b, '確定刪除？', async () => {
+    const x = list.find(y => y.id === b.dataset.delrep);
+    await api('deleteReport', { reportId: x.id });
+    toast(`已刪除 ${x.name} ${weekLabel(x.week)} 的回報`);
+    if (after) after(x); else b.closest('details').remove();
+  }));
 }
 
 /* ================= 首頁 ================= */
@@ -831,11 +854,11 @@ function renderWeekTab() {
     <div class="sec-h"><h2>回報內容</h2>${reps.length ? '<button class="btn plain small" id="copy-all">全部複製</button>' : ''}</div>
     ${reps.length ? reps.map(x => repCard(p, x, false, false)).join('') : '<p class="empty">這週還沒有人回報。</p>'}`;
   $('swk').onchange = () => { SWEEK = $('swk').value; renderWeekTab(); };
-  $('remind').onclick = () => pickAndSend(remindFlex(p, wk, reps, missing), '已把提醒貼到群組');
+  $('remind').onclick = () => pickAndSend(remindFlex(p, wk, reps, missing, S.members.length), '已把提醒貼到群組');
   $('copy-link').onclick = () => copyText(reportUrl(p.id), '已複製填寫連結');
   $('print').onclick = () => { $$('details.rep').forEach(d => d.open = true); setTimeout(() => window.print(), 100); if (!DEMO && liff.isInClient()) toast('LINE 裡面可能無法列印，可改用電腦或手機瀏覽器開啟平台'); };
   if ($('copy-all')) $('copy-all').onclick = () => copyText(reps.map(x => reportText(p, x)).join('\n\n'), `已複製 ${reps.length} 則回報`);
-  bindRepCards(p, reps);
+  bindRepCards(p, reps, () => openProject(p.id, 'week'));
 }
 
 const reportUrl = (pid, wk) => DEMO ? `${location.origin}${location.pathname}?demo=report` : `https://liff.line.me/${LIFF_ID}?p=${encodeURIComponent(pid)}${wk ? `&w=${wk}` : ''}`;
@@ -900,7 +923,7 @@ function personView(uid) {
     ${missed.length ? `<div class="stat" style="margin-bottom:12px"><h3>沒有回報的週</h3><div class="miss">${missed.map(w => `<span>${weekLabel(w)}</span>`).join('')}</div></div>` : ''}
     ${rs.map((x, i) => repCard(p, x, i === 0, true)).join('') || '<p class="empty">還沒有回報。</p>'}`);
   $('back').onclick = () => { PTAB = 'agg'; renderProject(); };
-  bindRepCards(p, rs);
+  bindRepCards(p, rs, async () => { S = await api('projectStats', { projectId: p.id }); personView(uid); });
 }
 
 function renderMembersTab() {
@@ -968,9 +991,13 @@ async function exportXlsx(weeks) {
 const flexInfo = (k, v, t) => ({ type: 'box', layout: 'baseline', spacing: 'md', contents: [
   { type: 'text', text: String(k), color: t.muted, size: 'sm', flex: 0 },
   { type: 'text', text: String(v === '' || v == null ? '—' : v), wrap: true, color: t.ink, size: 'sm', flex: 1, weight: 'bold' } ] });
-const flexBtn = (label, uri, t) => ({ type: 'box', layout: 'horizontal', spacing: 'md', paddingAll: '16px', contents: [
-  { type: 'box', layout: 'vertical', width: '6px', cornerRadius: '3px', backgroundColor: t.notch, contents: [] },
-  { type: 'button', style: 'primary', color: t.btn, height: 'sm', flex: 1, action: { type: 'uri', label: String(label).slice(0, 20), uri } } ] });
+/** 圖卡下方：主要按鈕＋「轉傳給其他群組或朋友」（LINE 不一定能長按轉傳程式產生的圖卡） */
+const flexBtn = (label, uri, t, shareUri) => ({ type: 'box', layout: 'vertical', paddingAll: '16px', paddingBottom: shareUri ? '8px' : '16px', contents: [
+  { type: 'box', layout: 'horizontal', spacing: 'md', contents: [
+    { type: 'box', layout: 'vertical', width: '6px', cornerRadius: '3px', backgroundColor: t.notch, contents: [] },
+    { type: 'button', style: 'primary', color: t.btn, height: 'sm', flex: 1, action: { type: 'uri', label: String(label).slice(0, 20), uri } } ] },
+  ...(shareUri ? [{ type: 'button', style: 'link', height: 'sm', color: t.muted, margin: 'sm', action: { type: 'uri', label: '轉傳給其他群組或朋友', uri: shareUri } }] : []) ] });
+const fwdUrl = q => `https://liff.line.me/${LIFF_ID}?${q}`;
 
 /** 個人回報圖卡：版面跟大家原本貼的文字一樣，名單一人一行、代號靠右 */
 function reportFlex(p, r) {
@@ -1001,7 +1028,7 @@ function reportFlex(p, r) {
   });
   const bubble = { type: 'bubble', size: 'mega', styles: { body: { backgroundColor: t.paper }, footer: { backgroundColor: t.paper } },
     body: { type: 'box', layout: 'vertical', paddingAll: '20px', contents: body },
-    footer: flexBtn('我也要回報', reportUrl(p.id, r.week), t) };
+    footer: flexBtn('我也要回報', reportUrl(p.id, r.week), t, fwdUrl(`fwd=r&p=${encodeURIComponent(p.id)}&w=${r.week}&r=${encodeURIComponent(r.id)}`)) };
   const photo = p.fields.filter(f => f.type === 'photo').flatMap(f => (r.data || {})[f.id] || []).find(isHttps);
   if (photo) bubble.hero = { type: 'image', url: photo, size: 'full', aspectRatio: '20:13', aspectMode: 'cover' };
   return { type: 'flex', altText: `${r.name} 回報了 ${weekLabel(r.week)}「${p.title}」`.slice(0, 400), contents: bubble };
@@ -1018,13 +1045,13 @@ function reportItems(p) {
 }
 
 /** 提醒卡：哪一週、截止時間、已交人數、要回報的項目和還沒交的名單 */
-function remindFlex(p, wk, reps, missing) {
+function remindFlex(p, wk, reps, missing, total) {
   const t = themeOf(p);
   const body = [
     { type: 'text', text: '回報提醒', size: 'xs', color: t.btn, weight: 'bold' },
     { type: 'text', text: p.title, weight: 'bold', size: 'xl', color: t.ink, wrap: true, margin: 'sm' },
     { type: 'box', layout: 'vertical', margin: 'lg', spacing: 'sm', contents: [
-      flexInfo('週次', weekLabel(wk), t), flexInfo('截止', dueLabel(wk, p.dueTime), t), flexInfo('已交', `${reps.length}／${S.members.length} 人`, t) ] },
+      flexInfo('週次', weekLabel(wk), t), flexInfo('截止', dueLabel(wk, p.dueTime), t), flexInfo('已交', total ? `${reps.length}／${total} 人` : `${reps.length} 人`, t) ] },
   ];
   const items = reportItems(p);
   if (items.length) {
@@ -1041,7 +1068,7 @@ function remindFlex(p, wk, reps, missing) {
   }
   return { type: 'flex', altText: `【回報提醒】${p.title} ${weekLabel(wk)}，截止 ${dueLabel(wk, p.dueTime)}`.slice(0, 400),
     contents: { type: 'bubble', styles: { body: { backgroundColor: t.paper }, footer: { backgroundColor: t.paper } },
-      body: { type: 'box', layout: 'vertical', paddingAll: '20px', contents: body }, footer: flexBtn('填寫回報', reportUrl(p.id, wk), t) } };
+      body: { type: 'box', layout: 'vertical', paddingAll: '20px', contents: body }, footer: flexBtn('填寫回報', reportUrl(p.id, wk), t, fwdUrl(`fwd=m&p=${encodeURIComponent(p.id)}&w=${wk}`)) } };
 }
 
 /** 提醒卡的網頁預覽（內容與 remindFlex 相同） */
@@ -1055,6 +1082,31 @@ function remindPreview(p, wk, reps, missing, total) {
     <ol style="margin:0;padding-left:1.6em;font-size:14px;line-height:1.7">${reportItems(p).map(x => `<li>${esc(x)}</li>`).join('')}</ol>
     ${missing.length ? `<p style="margin:12px 0 4px;font-size:14px;font-weight:700;border-top:1px solid var(--rule);padding-top:10px">還沒回報（${missing.length}）</p><p style="margin:0;font-size:14px;color:var(--ink-2)">${missing.map(m => esc(m.name)).join('、')}</p>` : ''}
   </div><div class="stub" style="padding:10px 18px 16px"><span class="notch"></span><span class="fake-btn">填寫回報</span></div></div>`;
+}
+
+/* ================= 轉傳圖卡給其他群組或朋友 =================
+   從圖卡上的「轉傳給其他群組或朋友」進來：重新做一張同樣的圖卡，用 LINE 的選單選群組或朋友 */
+async function forwardFlow(kind, pid, wk, rid) {
+  view(loading());
+  const r = await api('weekReports', { projectId: pid, week: wk });
+  const p = r.project;
+  let msg, html, title;
+  if (kind === 'r') {
+    const rep = r.reports.find(x => x.id === rid);
+    if (!rep) throw new Error('找不到這則回報，可能已經被刪除');
+    msg = reportFlex(p, rep); title = `${rep.name} 的回報`;
+    html = `<pre class="rtext">${esc(reportText(p, rep))}</pre>`;
+  } else {
+    msg = remindFlex(p, wk, r.reports, [], 0); title = '回報提醒';
+    html = `<p>${weekLabel(wk)}・截止 <b>${dueLabel(wk, p.dueTime)}</b></p><p class="muted">目前 ${r.reports.length} 人已回報。</p>`;
+  }
+  document.title = title;
+  view(`<section class="solo">
+    ${ticket({ ...p, title: `${title}`, desc: `${p.title}・${weekLabel(wk)}` }, `<div class="result-msg"><p style="margin-bottom:10px">把這張圖卡轉傳給其他群組或朋友，可以一次勾選好幾個。</p>${html}</div>`)}
+    <button class="btn send" style="margin-top:18px" id="go">選擇群組或朋友</button>
+    ${liff.isInClient() ? `<button class="btn plain" style="margin-top:10px" onclick="liff.closeWindow()">回到聊天室</button>` : ''}
+  </section>`);
+  $('go').onclick = async () => { if (await pickAndSend(msg, '已轉傳') && liff.isInClient()) liff.closeWindow(); };
 }
 
 /* ================= 我的資料：查看、修改、刪除 ================= */
