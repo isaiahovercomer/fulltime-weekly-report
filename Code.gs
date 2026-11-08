@@ -38,6 +38,7 @@ function setup() {
   if (!ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'remindTick')) {
     ScriptApp.newTrigger('remindTick').timeBased().everyHours(1).create();
   }
+  try { addFirstAdmin(); } catch (e) { Logger.log(e.message); } // 還沒有管理員時，把第一個登入平台的人設為管理員
 }
 
 function doGet() { return json({ ok: true, msg: '全時間工作重點回報系統運作中' }); }
