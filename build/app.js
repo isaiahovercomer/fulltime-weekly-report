@@ -651,7 +651,7 @@ function renderHome() {
     </nav>
     <div id="panel"></div>
     <footer class="page-foot">${isStandalone() ? '' : '<a class="mydata-link" href="#" id="install-link">安裝到手機桌面</a>'}${myDataLinkInline()}</footer>`);
-  $$('[data-tab]').forEach(b => b.onclick = () => { TAB = b.dataset.tab; renderHome(); });
+  $$('[data-tab]').forEach(b => b.onclick = () => { TAB = b.dataset.tab; SELECTING = false; SELECTED.clear(); renderHome(); });
   $('help').onclick = () => startTour(TOUR_STEPS);
   if ($('install-link')) $('install-link').onclick = e => { e.preventDefault(); startInstall(); };
   TAB === 'admin' ? renderAdminList() : renderMine();
@@ -670,19 +670,43 @@ function renderMine() {
   $$('[data-open]').forEach(b => b.onclick = () => reportFlow(b.dataset.open));
 }
 
+/** 我負責的項目：點進去管理；按「選取」可以勾選好幾個一次刪除 */
+let SELECTING = false;
+const SELECTED = new Set();
 function renderAdminList() {
   const list = PROJECTS.filter(p => p.canManage);
-  $('panel').innerHTML = `<button class="btn send" id="new-proj" style="margin-bottom:8px">＋ 建立新的回報項目</button>
-    <p class="caption" style="margin:0 0 16px">${ME.isAdmin ? '你是總管理人，可以管理所有人建立的項目。' : '每個人都能建立回報項目，成為該項目的負責人。'}</p>
-    ${list.length ? `<div class="stubs">${list.map(p => `
-      <button class="stub-card proj-card ${p.open ? '' : 'past'}" data-proj="${p.id}" style="${themeVars(themeOf(p))};border-left:6px solid var(--line)">
-        <div class="info"><div class="t">${esc(p.title)}</div>
+  [...SELECTED].forEach(id => { if (!list.some(p => p.id === id)) SELECTED.delete(id); });
+  $('panel').innerHTML = `${SELECTING ? '' : `<button class="btn send" id="new-proj" style="margin-bottom:8px">＋ 建立新的回報項目</button>
+    <p class="caption" style="margin:0 0 16px">${ME.isAdmin ? '你是總管理人，可以管理所有人建立的項目。' : '每個人都能建立回報項目，成為該項目的負責人。'}</p>`}
+    ${list.length ? `<div class="list-head"><span>${SELECTING ? `已選 ${SELECTED.size} 個` : `共 ${list.length} 個項目`}</span>
+      <span class="list-acts">${SELECTING ? `<button class="btn plain small" id="sel-all">${SELECTED.size === list.length ? '全不選' : '全選'}</button>` : ''}<button class="btn plain small" id="sel-toggle">${SELECTING ? '完成' : '選取'}</button></span></div>
+    <div class="stubs ${SELECTING ? 'selecting' : ''}">${list.map(p => `
+      <button class="stub-card proj-card ${p.open ? '' : 'past'}" data-proj="${p.id}" ${SELECTING ? `role="checkbox" aria-checked="${SELECTED.has(p.id)}"` : ''} style="${themeVars(themeOf(p))};border-left:6px solid var(--line)">
+        <div class="info">${SELECTING ? '<span class="check" aria-hidden="true"></span>' : ''}<div class="t">${esc(p.title)}</div>
           <div class="d">每週${REMIND_DAYS[p.remindDay] ? REMIND_DAYS[p.remindDay].slice(1) : '日'} ${esc(p.remindTime)} 提醒・週一 ${esc(p.dueTime)} 截止${ME.isAdmin && p.owner ? `<br>負責人 ${esc(p.owner)}` : ''}</div>
           ${p.open ? `<span class="pill ok">回報中</span>` : '<span class="pill off">已停止</span>'}</div>
         <div class="count"><b>${p.submitted}</b><small>／${p.memberCount}<br>${weekLabel(p.defaultWeek)}</small></div>
-      </button>`).join('')}</div>` : '<p class="empty">你還沒有負責的回報項目，按上面的按鈕建立第一個。</p>'}`;
-  $('new-proj').onclick = () => editProject(null);
-  $$('[data-proj]').forEach(b => b.onclick = () => openProject(b.dataset.proj, 'week'));
+      </button>`).join('')}</div>
+    ${SELECTING ? `<p class="caption">刪除項目會連同它所有的回報紀錄一起刪除，無法復原。只想暫停請進項目的「設定」按「停止回報」。</p>
+      <div class="dock"><div class="inner"><button class="btn danger-fill" id="del-sel" ${SELECTED.size ? '' : 'disabled'}>刪除所選項目${SELECTED.size ? `（${SELECTED.size}）` : ''}</button></div></div>` : ''}`
+    : '<p class="empty">你還沒有負責的回報項目，按上面的按鈕建立第一個。</p>'}`;
+  if ($('new-proj')) $('new-proj').onclick = () => editProject(null);
+  if ($('sel-toggle')) $('sel-toggle').onclick = () => { SELECTING = !SELECTING; SELECTED.clear(); renderAdminList(); };
+  if ($('sel-all')) $('sel-all').onclick = () => { if (SELECTED.size === list.length) SELECTED.clear(); else list.forEach(p => SELECTED.add(p.id)); renderAdminList(); };
+  $$('[data-proj]').forEach(b => b.onclick = () => {
+    if (!SELECTING) return openProject(b.dataset.proj, 'week');
+    const id = b.dataset.proj; SELECTED.has(id) ? SELECTED.delete(id) : SELECTED.add(id); renderAdminList();
+  });
+  if ($('del-sel')) $('del-sel').onclick = () => armThen($('del-sel'), `確定刪除 ${SELECTED.size} 個項目和所有回報？再按一次`, async () => {
+    const ids = [...SELECTED];
+    $('del-sel').textContent = '刪除中…';
+    let ok = 0;
+    for (const id of ids) { try { await api('deleteProject', { projectId: id }); ok++; } catch (e) { toast(e.message); } }
+    SELECTED.clear(); SELECTING = false;
+    await reloadProjects();
+    toast(`已刪除 ${ok} 個項目`);
+    renderHome();
+  });
 }
 
 /* ================= 建立／編輯回報項目 ================= */
