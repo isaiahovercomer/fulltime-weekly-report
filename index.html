@@ -1230,6 +1230,7 @@ function renderWeekTab() {
     <div class="week-bar"><select class="inp" id="swk">${S.weeks.map(w => `<option value="${w}" ${w === wk ? 'selected' : ''}>${weekLabel(w)}${w === S.defaultWeek ? '（本次）' : ''}</option>`).join('')}</select></div>
     <p class="due">截止：<b>${dueLabel(wk, p.dueTime)}</b></p>
     <div class="facts three"><div class="fact"><small>已回報</small><b>${reps.length}</b></div><div class="fact"><small>未回報</small><b>${missing.length}</b></div><div class="fact"><small>逾期</small><b>${late}</b></div></div>
+    <details class="rep" style="margin-top:12px"><summary><span class="nm">提醒卡預覽</span><span class="mt">群組裡看到的樣子</span></summary><div class="body">${remindPreview(p, wk, reps, missing)}</div></details>
     <button class="btn send" id="remind" style="margin-top:12px">${missing.length ? `發提醒到群組（${missing.length} 人未交）` : '發提醒到群組'}</button>
     <div class="btn-row"><button class="btn plain" id="copy-link">複製填寫連結</button><button class="btn plain" id="print">列印／存 PDF</button></div>
     ${missing.length ? `<div class="sec-h"><h2>未回報</h2></div><div class="miss">${missing.map(m => `<span>${esc(m.name)}</span>`).join('')}</div>` : (reps.length ? '<p class="posted" style="margin-top:14px">這週全部都回報了。</p>' : '')}
@@ -1414,7 +1415,17 @@ function reportFlex(p, r) {
   return { type: 'flex', altText: `${r.name} 回報了 ${weekLabel(r.week)}「${p.title}」`.slice(0, 400), contents: bubble };
 }
 
-/** 提醒卡：哪一週、截止時間、已交人數和還沒交的名單 */
+/** 要回報的項目，一行一項：記住的資料併成一行、名單附代號、選填的照原名 */
+function reportItems(p) {
+  const out = [], infos = p.fields.filter(f => f.type === 'info');
+  p.fields.forEach(f => {
+    if (f.type === 'info') { if (f === infos[0]) out.push(`${infos.map(x => x.label).join('、')}（填過會記住）`); }
+    else out.push(fieldTitle(f));
+  });
+  return out;
+}
+
+/** 提醒卡：哪一週、截止時間、已交人數、要回報的項目和還沒交的名單 */
 function remindFlex(p, wk, reps, missing) {
   const t = themeOf(p);
   const body = [
@@ -1423,6 +1434,14 @@ function remindFlex(p, wk, reps, missing) {
     { type: 'box', layout: 'vertical', margin: 'lg', spacing: 'sm', contents: [
       flexInfo('週次', weekLabel(wk), t), flexInfo('截止', dueLabel(wk, p.dueTime), t), flexInfo('已交', `${reps.length}／${S.members.length} 人`, t) ] },
   ];
+  const items = reportItems(p);
+  if (items.length) {
+    body.push({ type: 'separator', margin: 'lg', color: t.line });
+    body.push({ type: 'text', text: '要回報的項目', size: 'sm', weight: 'bold', color: t.ink, margin: 'lg' });
+    body.push({ type: 'box', layout: 'vertical', margin: 'sm', spacing: 'xs', contents: items.map((x, i) => ({ type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+      { type: 'text', text: `${i + 1}.`, size: 'sm', color: t.btn, weight: 'bold', flex: 0 },
+      { type: 'text', text: x, size: 'sm', color: t.ink, wrap: true, flex: 1 } ] })) });
+  }
   if (missing.length) {
     body.push({ type: 'separator', margin: 'lg', color: t.line });
     body.push({ type: 'text', text: `還沒回報（${missing.length}）`, size: 'sm', weight: 'bold', color: t.ink, margin: 'lg' });
@@ -1431,6 +1450,19 @@ function remindFlex(p, wk, reps, missing) {
   return { type: 'flex', altText: `【回報提醒】${p.title} ${weekLabel(wk)}，截止 ${dueLabel(wk, p.dueTime)}`.slice(0, 400),
     contents: { type: 'bubble', styles: { body: { backgroundColor: t.paper }, footer: { backgroundColor: t.paper } },
       body: { type: 'box', layout: 'vertical', paddingAll: '20px', contents: body }, footer: flexBtn('填寫回報', reportUrl(p.id, wk), t) } };
+}
+
+/** 提醒卡的網頁預覽（內容與 remindFlex 相同） */
+function remindPreview(p, wk, reps, missing) {
+  const t = themeOf(p);
+  return `<div class="ticket" style="${themeVars(t)};box-shadow:none;border:1.5px solid var(--rule)"><div class="main" style="padding:16px 18px 12px">
+    <p style="margin:0;font-size:12px;font-weight:700;color:var(--line)">回報提醒</p>
+    <h2 class="title" style="font-size:20px;margin:2px 0 10px">${esc(p.title)}</h2>
+    <dl><dt>週次</dt><dd><b>${weekLabel(wk)}</b></dd><dt>截止</dt><dd><b>${dueLabel(wk, p.dueTime)}</b></dd><dt>已交</dt><dd><b>${reps.length}／${S.members.length} 人</b></dd></dl>
+    <p style="margin:12px 0 4px;font-size:14px;font-weight:700;border-top:1px solid var(--rule);padding-top:10px">要回報的項目</p>
+    <ol style="margin:0;padding-left:1.6em;font-size:14px;line-height:1.7">${reportItems(p).map(x => `<li>${esc(x)}</li>`).join('')}</ol>
+    ${missing.length ? `<p style="margin:12px 0 4px;font-size:14px;font-weight:700;border-top:1px solid var(--rule);padding-top:10px">還沒回報（${missing.length}）</p><p style="margin:0;font-size:14px;color:var(--ink-2)">${missing.map(m => esc(m.name)).join('、')}</p>` : ''}
+  </div><div class="stub" style="padding:10px 18px 16px"><span class="notch"></span><span class="fake-btn">填寫回報</span></div></div>`;
 }
 
 /* ================= 我的資料：查看、修改、刪除 ================= */
