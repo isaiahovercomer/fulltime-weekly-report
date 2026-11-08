@@ -5,7 +5,7 @@
 
 const CONFIG = {
   CHANNEL_ID: '2012412693',        // LINE Developers → LINE Login channel → Basic settings 的 Channel ID
-  LIFF_ID: '請填入 LIFF ID',       // 提醒信裡的連結會用到
+  LIFF_ID: '2012412693-oJoL0N7l',      // 提醒信裡的連結會用到
   TZ: 'Asia/Taipei',
   PHOTO_FOLDER: '全時間回報照片',   // 上傳的照片存在雲端硬碟這個資料夾
 };

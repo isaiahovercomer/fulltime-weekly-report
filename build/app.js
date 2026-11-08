@@ -1,5 +1,5 @@
 /* ======== 只需要改這兩行 ======== */
-const LIFF_ID = '請填入 LIFF ID';
+const LIFF_ID = '2012412693-oJoL0N7l';
 const GAS_URL = '請填入 Apps Script 網址';
 /* ================================ */
 
