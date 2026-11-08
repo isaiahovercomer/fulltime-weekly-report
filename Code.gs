@@ -12,13 +12,13 @@ const CONFIG = {
 
 const SH = { PROJECTS: '項目', PEOPLE: '名單', MEMBERS: '項目成員', REPORTS: '回報', ADMINS: '管理員' };
 const HEADERS = {
-  '項目': ['項目代碼', '名稱', '說明', '開始週', '結束週', '提醒星期', '提醒時間', '截止時間', '欄位', '色調', '開放', '建立者', '建立時間'],
+  '項目': ['項目代碼', '名稱', '說明', '開始週', '結束週', '提醒星期', '提醒時間', '截止時間', '欄位', '色調', '開放', '建立者', '建立時間', '提醒信 Email'],
   '名單': ['LINE userId', '姓名', 'LINE名稱', '記住的資料', '更新時間'],
   '項目成員': ['項目代碼', 'LINE userId', '加入時間'],
   '回報': ['回報代碼', '回報時間', '項目代碼', '週次', '姓名', 'LINE userId', '內容', '資料', '逾期', '修改時間'],
   '管理員': ['LINE userId', '名稱', 'Email（收提醒信，可留白）'],
 };
-const PJ = { ID: 0, TITLE: 1, DESC: 2, START: 3, END: 4, RDAY: 5, RTIME: 6, DUE: 7, FIELDS: 8, THEME: 9, OPEN: 10, CREATOR: 11, CREATED: 12 };
+const PJ = { ID: 0, TITLE: 1, DESC: 2, START: 3, END: 4, RDAY: 5, RTIME: 6, DUE: 7, FIELDS: 8, THEME: 9, OPEN: 10, CREATOR: 11, CREATED: 12, EMAIL: 13 };
 const RP = { ID: 0, TIME: 1, PID: 2, WEEK: 3, NAME: 4, UID: 5, TEXT: 6, DATA: 7, LATE: 8, EDITED: 9 };
 
 /** 建立工作表、補齊標題列、安裝每小時檢查提醒的排程。更新程式後再執行一次也安全 */
@@ -48,7 +48,7 @@ function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     const user = req.session && req.action !== 'session' ? userFromSession(req.session) : verifyIdToken(req.idToken);
-    const admin = () => requireAdmin(user);
+    const own = () => requireOwner(user, req.projectId);
     switch (req.action) {
       case 'session':       out = { ok: true, ...createSession(user) }; break;
       case 'me':            out = { ok: true, userId: user.userId, displayName: user.displayName, isAdmin: isAdmin(user.userId), profile: profileOf(user.userId) }; break;
@@ -56,18 +56,19 @@ function doPost(e) {
       case 'listProjects':  out = { ok: true, projects: listProjects(user) }; break;
       case 'project':       out = { ok: true, ...projectForUser(user, req.projectId, req.week) }; break;
       case 'submit':        out = { ok: true, ...submit(user, req.projectId, req.week, req.data) }; break;
-      case 'myReports':     out = { ok: true, project: getProject(req.projectId), reports: reportsOf(req.projectId).filter(r => r.userId === user.userId).sort(byWeekDesc) }; break;
-      case 'weekReports':   out = { ok: true, project: getProject(req.projectId), week: req.week, reports: reportsOf(req.projectId).filter(r => r.week === req.week) }; break;
+      case 'myReports':     out = { ok: true, project: publicProject(req.projectId), reports: reportsOf(req.projectId).filter(r => r.userId === user.userId).sort(byWeekDesc) }; break;
+      case 'weekReports':   out = { ok: true, project: publicProject(req.projectId), week: req.week, reports: reportsOf(req.projectId).filter(r => r.week === req.week) }; break;
       case 'deleteReport':  out = { ok: true, ...deleteReport(user, req.reportId) }; break;
       case 'uploadImage':   out = { ok: true, url: uploadImage(user, req.data, req.mime) }; break;
       case 'myData':        out = { ok: true, ...myData(user) }; break;
       case 'deleteMyData':  out = { ok: true, ...deleteMyData(user) }; break;
-      case 'projectStats':  admin(); out = { ok: true, ...projectStats(req.projectId) }; break;
-      case 'createProject': admin(); out = { ok: true, project: createProject(user, req.project || {}) }; break;
-      case 'updateProject': admin(); out = { ok: true, project: updateProject(req.projectId, req.project || {}) }; break;
-      case 'setOpen':       admin(); out = { ok: true, project: setOpen(req.projectId, !!req.open) }; break;
-      case 'deleteProject': admin(); deleteProject(req.projectId); out = { ok: true }; break;
-      case 'removeMember':  admin(); removeMember(req.projectId, req.userId); out = { ok: true, ...projectStats(req.projectId) }; break;
+      // 任何人都能建立項目，成為該項目的負責人；負責人和總管理人才能管理項目
+      case 'createProject': out = { ok: true, project: createProject(user, req.project || {}) }; break;
+      case 'projectStats':  own(); out = { ok: true, ...projectStats(req.projectId) }; break;
+      case 'updateProject': own(); out = { ok: true, project: updateProject(req.projectId, req.project || {}) }; break;
+      case 'setOpen':       own(); out = { ok: true, project: setOpen(req.projectId, !!req.open) }; break;
+      case 'deleteProject': own(); deleteProject(req.projectId); out = { ok: true }; break;
+      case 'removeMember':  own(); removeMember(req.projectId, req.userId); out = { ok: true, ...projectStats(req.projectId) }; break;
       default: throw new Error('未知的動作');
     }
   } catch (err) {
@@ -158,7 +159,10 @@ function weeksOf(p) {
 
 /* ---------- 管理員 ---------- */
 function isAdmin(uid) { return rows(SH.ADMINS).some(r => String(r[0]).trim() === uid); }
-function requireAdmin(user) { if (!isAdmin(user.userId)) throw new Error('只有管理員可以使用這個功能'); }
+/** 「建立者」欄存「LINE名稱 (userId)」 */
+function ownerOf(r) { const m = /\((U[0-9a-f]+)\)\s*$/.exec(String(r[PJ.CREATOR] || '')); return m ? m[1] : ''; }
+function canManage(uid, pid) { return isAdmin(uid) || ownerOf(findProjectRow(pid).r) === uid; }
+function requireOwner(user, pid) { if (!canManage(user.userId, pid)) throw new Error('只有這個項目的負責人可以管理'); }
 
 /* ---------- 個人資料（姓名＋記住的資料） ---------- */
 function findPerson(uid) {
@@ -211,6 +215,7 @@ function rowToProject(r) {
     remindDay: Number(r[PJ.RDAY]) || 0, remindTime: hhmm(r[PJ.RTIME], '20:00'), dueTime: hhmm(r[PJ.DUE], '12:00'),
     fields: parseJson(r[PJ.FIELDS], []) || [], theme: THEMES.indexOf(String(r[PJ.THEME])) >= 0 ? String(r[PJ.THEME]) : 'classic',
     open: isTrue(r[PJ.OPEN]), created: r[PJ.CREATED] instanceof Date ? fmt(r[PJ.CREATED], 'yyyy/M/d') : '',
+    ownerId: ownerOf(r), owner: String(r[PJ.CREATOR] || '').replace(/\s*\(U[0-9a-f]+\)\s*$/, ''), email: str(r[PJ.EMAIL], 200),
   };
 }
 function findProjectRow(id) {
@@ -219,6 +224,8 @@ function findProjectRow(id) {
   throw new Error('找不到這個回報項目，可能已經被刪除');
 }
 function getProject(id) { return rowToProject(findProjectRow(id).r); }
+/** 給一般填寫者看的項目：不含負責人的 userId 和提醒信 Email */
+function publicProject(id) { const p = getProject(id); delete p.ownerId; p.email = ''; return p; }
 function projectValues(input) {
   const title = str(input.title, 40), start = ymdOf(input.start), fields = cleanFields(input.fields);
   if (!title) throw new Error('請填寫項目名稱');
@@ -228,15 +235,18 @@ function projectValues(input) {
   return [title, str(input.desc, 200), start, ymdOf(input.end), rday, hhmm(input.remindTime, '20:00'), hhmm(input.dueTime, '12:00'),
     JSON.stringify(fields), THEMES.indexOf(input.theme) >= 0 ? input.theme : 'classic'];
 }
+function cleanEmails(v) { return String(v || '').split(/[,，;；\s]+/).map(e => e.trim()).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)).slice(0, 5).join(', '); }
 function createProject(user, input) {
   const v = projectValues(input);
   const id = 'P' + fmt(new Date(), 'yyMMddHHmmss');
-  sheet(SH.PROJECTS).appendRow([id].concat(v, [true, user.displayName + ' (' + user.userId + ')', new Date()]));
+  const owner = (profileOf(user.userId).name || user.displayName) + ' (' + user.userId + ')';
+  sheet(SH.PROJECTS).appendRow([id].concat(v, [true, owner, new Date(), cleanEmails(input.email)]));
   return getProject(id);
 }
 function updateProject(id, input) {
   const v = projectValues(input), f = findProjectRow(id);
   sheet(SH.PROJECTS).getRange(f.row, 2, 1, v.length).setValues([v]);
+  sheet(SH.PROJECTS).getRange(f.row, PJ.EMAIL + 1).setValue(cleanEmails(input.email));
   return getProject(id);
 }
 function setOpen(id, open) { const f = findProjectRow(id); sheet(SH.PROJECTS).getRange(f.row, PJ.OPEN + 1).setValue(open); return getProject(id); }
@@ -301,7 +311,7 @@ function cleanData(p, data) {
 }
 
 function projectForUser(user, pid, week) {
-  const p = getProject(pid), weeks = weeksOf(p);
+  const p = publicProject(pid), weeks = weeksOf(p);
   const wk = week && weeks.indexOf(week) >= 0 ? week : defaultWeek(p);
   const mine = reportsOf(pid).filter(r => r.userId === user.userId);
   const done = {}; mine.forEach(r => { done[r.week] = true; });
@@ -349,12 +359,14 @@ function submit(user, pid, week, data) {
 function listProjects(user) {
   const admin = isAdmin(user.userId);
   const reps = rows(SH.REPORTS), mem = rows(SH.MEMBERS);
-  return rows(SH.PROJECTS).map(rowToProject).filter(p => admin || p.open).map(p => {
+  // 大家看得到進行中的項目；自己負責的（含已停止的）和總管理人看得到全部
+  return rows(SH.PROJECTS).map(rowToProject).filter(p => admin || p.open || p.ownerId === user.userId).map(p => {
     const wk = defaultWeek(p);
     const got = reps.filter(r => String(r[RP.PID]) === p.id && ymdOf(r[RP.WEEK]) === wk);
     const ids = mem.filter(r => String(r[0]) === p.id).map(r => String(r[1]));
     return Object.assign(p, { defaultWeek: wk, submitted: got.length, memberCount: ids.length,
-      mineDone: got.some(r => String(r[RP.UID]) === user.userId), isMember: ids.indexOf(user.userId) >= 0 });
+      mineDone: got.some(r => String(r[RP.UID]) === user.userId), isMember: ids.indexOf(user.userId) >= 0,
+      canManage: admin || p.ownerId === user.userId, email: admin || p.ownerId === user.userId ? p.email : '', ownerId: undefined });
   }).reverse();
 }
 
@@ -372,7 +384,7 @@ function deleteReport(user, id) {
     const sh = sheet(SH.REPORTS), data = sh.getDataRange().getValues();
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][RP.ID]) !== String(id)) continue;
-      if (String(data[i][RP.UID]) !== user.userId && !isAdmin(user.userId)) throw new Error('只能刪除自己的回報');
+      if (String(data[i][RP.UID]) !== user.userId && !canManage(user.userId, String(data[i][RP.PID]))) throw new Error('只能刪除自己的回報');
       sh.deleteRow(i + 1);
       return { week: ymdOf(data[i][RP.WEEK]) };
     }
@@ -432,7 +444,8 @@ function sendRemindMail(p, wk) {
   const got = {}; st.reports.filter(r => r.week === wk).forEach(r => { got[r.userId] = true; });
   const missing = st.members.filter(m => !got[m.userId]).map(m => m.name);
   const link = 'https://liff.line.me/' + CONFIG.LIFF_ID + '?remind=' + encodeURIComponent(p.id);
-  const to = rows(SH.ADMINS).map(r => str(r[2], 100)).filter(e => /@/.test(e));
+  // 寄給項目設定的 Email；沒有設定就寄給總管理人
+  const to = p.email ? p.email.split(/,\s*/) : rows(SH.ADMINS).map(r => str(r[2], 100)).filter(e => /@/.test(e));
   if (!to.length) to.push(Session.getEffectiveUser().getEmail());
   const subject = '【回報提醒】' + p.title + ' ' + weekLabel(wk) + '，截止 ' + dueLabel(p, wk);
   const html = '<div style="font-family:sans-serif;line-height:1.7;color:#2F3343">'

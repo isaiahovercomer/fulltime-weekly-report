@@ -171,7 +171,8 @@ const demo = (() => {
   return {
     me: { userId: 'U2', displayName: '晨光', isAdmin: true },
     people, reports,
-    projects: [{ id: 'P1', title: '全時間工作重點回報', desc: '每週一中午前，回報上一週（週一～週日）的重點。', start: '2026-09-07', end: '', remindDay: 0, remindTime: '20:00', dueTime: '12:00', open: true, theme: 'youth', fields: DEFAULT_FIELDS(), created: '2026/9/1' }],
+    projects: [{ id: 'P1', title: '全時間工作重點回報', desc: '每週一中午前，回報上一週（週一～週日）的重點。', start: '2026-09-07', end: '', remindDay: 0, remindTime: '20:00', dueTime: '12:00', open: true, theme: 'youth', fields: DEFAULT_FIELDS(), created: '2026/9/1', owner: '簡晨光', ownerId: 'U2', email: '' },
+      { id: 'P2', title: '北屯專區禱告回報', desc: '', start: '2026-10-05', end: '', remindDay: 6, remindTime: '21:00', dueTime: '12:00', open: true, theme: 'prayer', fields: [{ id: 'g1', type: 'number', label: '禱告次數' }, { id: 'g2', type: 'text', label: '禱告重點' }], created: '2026/10/1', owner: '王小明', ownerId: 'U3', email: '' }],
     members: { P1: ['U1', 'U2', 'U3', 'U4', 'U5'].filter(u => people[u]) },
   };
 })();
@@ -200,12 +201,12 @@ async function demoApi(action, d) {
   const prof = () => demo.people[me] || { name: '', info: {} };
   const statsOf = p => ({ project: p, weeks: demoWeeks(p), defaultWeek: demoDefaultWeek(p),
     members: (demo.members[p.id] || []).map(u => ({ userId: u, name: demo.people[u].name, info: demo.people[u].info })),
-    reports: demo.reports.filter(r => !r.project || r.project === p.id) });
+    reports: demo.reports.filter(r => (r.project || 'P1') === p.id) });
   switch (action) {
     case 'me': return { ok: true, ...demo.me, profile: prof() };
     case 'listProjects': return { ok: true, projects: demo.projects.map(p => {
       const wk = demoDefaultWeek(p), got = demo.reports.filter(r => r.week === wk);
-      return { ...p, defaultWeek: wk, submitted: got.length, memberCount: (demo.members[p.id] || []).length, mineDone: got.some(r => r.userId === me), isMember: (demo.members[p.id] || []).includes(me) };
+      return { ...p, canManage: demo.me.isAdmin || p.ownerId === me, defaultWeek: wk, submitted: got.length, memberCount: (demo.members[p.id] || []).length, mineDone: got.some(r => r.userId === me), isMember: (demo.members[p.id] || []).includes(me) };
     }) };
     case 'project': {
       const p = P(d.projectId); if (!p) throw new Error('找不到這個回報項目');
@@ -232,7 +233,7 @@ async function demoApi(action, d) {
     case 'myReports': return { ok: true, project: P(d.projectId), reports: demo.reports.filter(r => r.userId === me).sort((a, b) => b.week.localeCompare(a.week)) };
     case 'weekReports': return { ok: true, project: P(d.projectId), week: d.week, reports: demo.reports.filter(r => r.week === d.week) };
     case 'projectStats': return { ok: true, ...statsOf(P(d.projectId)) };
-    case 'createProject': { const p = { ...d.project, id: 'P' + Date.now(), open: true, created: md(DEMO_NOW) }; demo.projects.unshift(p); demo.members[p.id] = []; return { ok: true, project: p }; }
+    case 'createProject': { const p = { ...d.project, id: 'P' + Date.now(), open: true, created: md(DEMO_NOW), owner: prof().name, ownerId: me }; demo.projects.unshift(p); demo.members[p.id] = []; return { ok: true, project: p }; }
     case 'updateProject': { const p = P(d.projectId); Object.assign(p, d.project); return { ok: true, project: p }; }
     case 'setOpen': { const p = P(d.projectId); p.open = d.open; return { ok: true, project: p }; }
     case 'deleteProject': demo.projects = demo.projects.filter(p => p.id !== d.projectId); return { ok: true };
@@ -281,13 +282,14 @@ async function main() {
       if (liff.isLoggedIn() && !getSession()) { try { setSession(await api('session')); } catch (e) {} }
     }
     if (PARAMS.has('mydata')) return myDataFlow();
+    if (PARAMS.get('all') && PARAMS.get('p')) { ME = await api('me'); return weekAllFlow(PARAMS.get('p'), PARAMS.get('w')); }
     if (PARAMS.get('fwd')) return forwardFlow(PARAMS.get('fwd'), PARAMS.get('p'), PARAMS.get('w'), PARAMS.get('r'));
     ME = await api('me');
     const pid = PARAMS.get('p');
     if (pid || ['report', 'first', 'done'].includes(DEMO_MODE)) return reportFlow(pid || 'P1', PARAMS.get('w'));
     await homeFlow();
     const rid = PARAMS.get('remind') || (DEMO_MODE === 'admin' ? 'P1' : '');
-    if (rid && ME.isAdmin) openProject(rid, 'week');
+    if (rid) openProject(rid, 'week');
   } catch (e) {
     view(`<section class="solo">${ticket({ title: '無法開啟' }, `<div class="result-msg"><p>${esc(e.message)}</p><p class="muted">請關閉後從 LINE 重新開啟一次。</p></div>`)}</section>`);
   }
@@ -301,6 +303,7 @@ const subbar = (label, title) => `<div class="subbar"><button class="back" id="b
 let R = null; // 目前的回報表單 { project, week, weeks, mine, last, profile, data }
 
 async function reportFlow(pid, wk) {
+  MANAGING = false;
   view(loading());
   const r = await api('project', { projectId: pid, week: wk });
   R = r;
@@ -584,11 +587,19 @@ async function weekAllFlow(pid, wk) {
   view(loading());
   const r = await api('weekReports', { projectId: pid, week: wk });
   const p = r.project;
-  view(`${subbar('返回', `${weekLabel(wk)} 的回報`)}
-    <p class="summary">${esc(p.title)}・${r.reports.length} 人已回報</p>
-    ${r.reports.length ? r.reports.map(x => repCard(p, x, false, false)).join('') : '<p class="empty">這週還沒有人回報。</p>'}`);
+  MANAGING = false;
+  const reps = r.reports.slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hant'));
+  const ms = metricsOf(p).filter(m => m.key !== '_n');
+  view(`${subbar('填寫我的回報', '')}
+    <h1 class="form-title" style="margin-top:0">${weekLabel(wk)} 大家的回報</h1>
+    <p class="summary">${esc(p.title)}・${reps.length} 人已回報</p>
+    ${reps.length && ms.length ? `<div class="sec-h" style="margin-top:6px"><h2>這週合計</h2></div>
+      <div class="stat" style="margin-bottom:6px">${ms.map(m => `<div class="metric"><span>${esc(m.label)}</span><span class="v">${sumOf(m, reps)}</span></div>`).join('')}</div>` : ''}
+    <div class="sec-h"><h2>每個人的回報</h2>${reps.length ? '<button class="btn plain small" id="copy-all">全部複製</button>' : ''}</div>
+    ${reps.length ? reps.map(x => repCard(p, x, false, false)).join('') : '<p class="empty">這週還沒有人回報。</p>'}`);
+  if ($('copy-all')) $('copy-all').onclick = () => copyText(reps.map(x => reportText(p, x)).join('\n\n'), `已複製 ${reps.length} 則回報`);
   $('back').onclick = () => reportFlow(pid, wk);
-  bindRepCards(p, r.reports, () => weekAllFlow(pid, wk));
+  bindRepCards(p, reps, () => weekAllFlow(pid, wk));
 }
 
 /** 刪除自己這週的回報：按兩次確認；群組裡已經貼出的圖卡無法收回 */
@@ -600,7 +611,8 @@ function deleteMine(btn, rep) {
     reportFlow(R.project.id, rep.week);
   });
 }
-const canDelete = x => ME && (x.userId === ME.userId || ME.isAdmin);
+let MANAGING = false; // 正在看自己負責的項目（每週、個人紀錄）
+const canDelete = x => ME && (x.userId === ME.userId || ME.isAdmin || MANAGING);
 
 /** 一則回報（可展開）；自己的回報或管理員可以刪除 */
 function repCard(p, x, open, showWeek) {
@@ -631,17 +643,18 @@ async function homeFlow() {
 }
 
 function renderHome() {
+  MANAGING = false;
   view(`${header('全時間工作重點回報')}
     <nav class="tabs" role="tablist">
       <button role="tab" aria-selected="${TAB === 'mine'}" data-tab="mine">我的回報</button>
-      ${ME.isAdmin ? `<button role="tab" aria-selected="${TAB === 'admin'}" data-tab="admin">管理<span class="n">${PROJECTS.length}</span></button>` : ''}
+      <button role="tab" aria-selected="${TAB === 'admin'}" data-tab="admin">${ME.isAdmin ? '管理全部項目' : '我負責的項目'}<span class="n">${PROJECTS.filter(p => p.canManage).length}</span></button>
     </nav>
     <div id="panel"></div>
     <footer class="page-foot">${isStandalone() ? '' : '<a class="mydata-link" href="#" id="install-link">安裝到手機桌面</a>'}${myDataLinkInline()}</footer>`);
   $$('[data-tab]').forEach(b => b.onclick = () => { TAB = b.dataset.tab; renderHome(); });
   $('help').onclick = () => startTour(TOUR_STEPS);
   if ($('install-link')) $('install-link').onclick = e => { e.preventDefault(); startInstall(); };
-  TAB === 'admin' && ME.isAdmin ? renderAdminList() : renderMine();
+  TAB === 'admin' ? renderAdminList() : renderMine();
 }
 
 function renderMine() {
@@ -649,23 +662,25 @@ function renderMine() {
   $('panel').innerHTML = list.length ? `<div class="stubs">${list.map(p => `
     <button class="stub-card proj-card" data-open="${p.id}" style="${themeVars(themeOf(p))};border-left:6px solid var(--line)">
       <div class="info"><div class="t">${esc(p.title)}</div>
-        <div class="d">${weekLabel(p.defaultWeek)}・截止 <b>${dueLabel(p.defaultWeek, p.dueTime)}</b></div>
+        <div class="d">${weekLabel(p.defaultWeek)}・截止 <b>${dueLabel(p.defaultWeek, p.dueTime)}</b>${p.owner ? `・負責人 ${esc(p.owner)}` : ''}</div>
         ${p.mineDone ? '<span class="pill ok">已回報</span>' : '<span class="pill todo">還沒回報</span>'}</div>
       <div class="count"><b>${p.submitted}</b><small>／${p.memberCount} 人已交</small></div>
     </button>`).join('')}</div>`
-    : `<div class="empty"><p>目前沒有進行中的回報項目。</p><p class="muted">管理員建立項目後，會在群組貼出提醒，點提醒就能填寫。</p></div>`;
+    : `<div class="empty"><p>目前沒有進行中的回報項目。</p><p class="muted">項目負責人會在群組貼出提醒，點提醒就能填寫。也可以到「我負責的項目」自己建立一個。</p></div>`;
   $$('[data-open]').forEach(b => b.onclick = () => reportFlow(b.dataset.open));
 }
 
 function renderAdminList() {
-  $('panel').innerHTML = `<button class="btn send" id="new-proj" style="margin-bottom:16px">＋ 建立新的回報項目</button>
-    ${PROJECTS.length ? `<div class="stubs">${PROJECTS.map(p => `
+  const list = PROJECTS.filter(p => p.canManage);
+  $('panel').innerHTML = `<button class="btn send" id="new-proj" style="margin-bottom:8px">＋ 建立新的回報項目</button>
+    <p class="caption" style="margin:0 0 16px">${ME.isAdmin ? '你是總管理人，可以管理所有人建立的項目。' : '每個人都能建立回報項目，成為該項目的負責人。'}</p>
+    ${list.length ? `<div class="stubs">${list.map(p => `
       <button class="stub-card proj-card ${p.open ? '' : 'past'}" data-proj="${p.id}" style="${themeVars(themeOf(p))};border-left:6px solid var(--line)">
         <div class="info"><div class="t">${esc(p.title)}</div>
-          <div class="d">每週${REMIND_DAYS[p.remindDay] ? REMIND_DAYS[p.remindDay].slice(1) : '日'} ${esc(p.remindTime)} 提醒・週一 ${esc(p.dueTime)} 截止</div>
+          <div class="d">每週${REMIND_DAYS[p.remindDay] ? REMIND_DAYS[p.remindDay].slice(1) : '日'} ${esc(p.remindTime)} 提醒・週一 ${esc(p.dueTime)} 截止${ME.isAdmin && p.owner ? `<br>負責人 ${esc(p.owner)}` : ''}</div>
           ${p.open ? `<span class="pill ok">回報中</span>` : '<span class="pill off">已停止</span>'}</div>
         <div class="count"><b>${p.submitted}</b><small>／${p.memberCount}<br>${weekLabel(p.defaultWeek)}</small></div>
-      </button>`).join('')}</div>` : '<p class="empty">還沒有回報項目，按上面的按鈕建立第一個。</p>'}`;
+      </button>`).join('')}</div>` : '<p class="empty">你還沒有負責的回報項目，按上面的按鈕建立第一個。</p>'}`;
   $('new-proj').onclick = () => editProject(null);
   $$('[data-proj]').forEach(b => b.onclick = () => openProject(b.dataset.proj, 'week'));
 }
@@ -688,10 +703,11 @@ function editProject(p) {
       <label class="field"><span>到哪一週結束（選填）</span><input class="inp" type="date" id="pj-end" value="${esc(PD.end)}"></label></div>
       <p class="help" style="font-size:12px;color:var(--ink-2);margin:0">一週是週一～週日；選任何一天都會算那一整週。沒填結束就一直進行到你按「停止回報」。</p></div>
     <div class="group"><h2>提醒與截止</h2><div class="row2">
-      <label class="field"><span>提醒管理員</span><select class="inp" id="pj-rday">${Object.entries(REMIND_DAYS).map(([k, v]) => `<option value="${k}" ${+k === +PD.remindDay ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label class="field"><span>提醒負責人</span><select class="inp" id="pj-rday">${Object.entries(REMIND_DAYS).map(([k, v]) => `<option value="${k}" ${+k === +PD.remindDay ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
       <label class="field"><span>提醒時間</span><input class="inp" type="time" id="pj-rtime" value="${esc(PD.remindTime)}"></label></div>
       <label class="field"><span>截止：該週結束後的週一幾點</span><input class="inp" type="time" id="pj-due" value="${esc(PD.dueTime)}" style="max-width:12em"></label>
-      <p class="help" style="font-size:12px;color:var(--ink-2);margin:0">時間到了會寄 Email 給管理員，信裡有連結，點一下就能把提醒卡貼到群組。</p></div>
+      <label class="field"><span>提醒信寄到哪個 Email（選填，多個用逗號分開）</span><input class="inp" type="email" id="pj-email" value="${esc(PD.email || '')}" placeholder="例如 name@gmail.com" autocomplete="email"></label>
+      <p class="help" style="font-size:12px;color:var(--ink-2);margin:0">時間到了會寄 Email，信裡有連結，點一下就能把提醒卡貼到群組。沒填 Email 就寄給總管理人；也可以不等信，隨時打開項目按「發提醒到群組」。</p></div>
     <div class="group"><h2>圖卡色調</h2><div class="tones" role="radiogroup">${Object.entries(THEMES).map(([k, t]) => `<button type="button" role="radio" aria-checked="${PD.theme === k}" data-theme="${k}" style="--sw:${t.btn};--sw2:${t.notch}"><i></i>${t.name}</button>`).join('')}</div></div>
     <div class="group"><h2>回報欄位</h2><p style="font-size:13px;color:var(--ink-2);margin:-4px 0 10px">照順序顯示在填寫頁和群組圖卡上。名單可以設定格數、是否開放填寫者再加一格，和可複選的代號。</p>
       <div id="pj-fields"></div>
@@ -789,7 +805,7 @@ function drawFieldEditor() {
 async function saveProject(isNew, old) {
   const btn = $('pj-save'), label = btn.textContent;
   const proj = { title: $('pj-title').value.trim(), desc: $('pj-desc').value.trim(), start: $('pj-start').value, end: $('pj-end').value,
-    remindDay: +$('pj-rday').value, remindTime: $('pj-rtime').value || '20:00', dueTime: $('pj-due').value || '12:00', theme: PD.theme,
+    remindDay: +$('pj-rday').value, remindTime: $('pj-rtime').value || '20:00', dueTime: $('pj-due').value || '12:00', theme: PD.theme, email: $('pj-email').value.trim(),
     fields: PD.fields.map(f => ({ ...f, label: String(f.label || '').trim() })).filter(f => f.label) };
   if (!proj.title) { toast('請填寫項目名稱'); return; }
   if (!proj.start) { toast('請選擇開始的週'); return; }
@@ -820,6 +836,7 @@ async function openProject(pid, tab) {
 }
 
 function renderProject() {
+  MANAGING = true;
   const p = S.project;
   document.title = p.title;
   view(`${subbar('所有項目', '')}
@@ -997,11 +1014,13 @@ const flexInfo = (k, v, t) => ({ type: 'box', layout: 'baseline', spacing: 'md',
   { type: 'text', text: String(k), color: t.muted, size: 'sm', flex: 0 },
   { type: 'text', text: String(v === '' || v == null ? '—' : v), wrap: true, color: t.ink, size: 'sm', flex: 1, weight: 'bold' } ] });
 /** 圖卡下方：主要按鈕＋「轉傳給其他群組或朋友」（LINE 不一定能長按轉傳程式產生的圖卡） */
-const flexBtn = (label, uri, t, shareUri) => ({ type: 'box', layout: 'vertical', paddingAll: '16px', paddingBottom: shareUri ? '8px' : '16px', contents: [
+const flexBtn = (label, uri, t, shareUri, allUri) => ({ type: 'box', layout: 'vertical', paddingAll: '16px', paddingBottom: shareUri || allUri ? '8px' : '16px', contents: [
   { type: 'box', layout: 'horizontal', spacing: 'md', contents: [
     { type: 'box', layout: 'vertical', width: '6px', cornerRadius: '3px', backgroundColor: t.notch, contents: [] },
     { type: 'button', style: 'primary', color: t.btn, height: 'sm', flex: 1, action: { type: 'uri', label: String(label).slice(0, 20), uri } } ] },
-  ...(shareUri ? [{ type: 'button', style: 'link', height: 'sm', color: t.muted, margin: 'sm', action: { type: 'uri', label: '轉傳給其他群組或朋友', uri: shareUri } }] : []) ] });
+  ...(allUri ? [{ type: 'button', style: 'link', height: 'sm', color: t.btn, margin: 'sm', action: { type: 'uri', label: '看這週大家的回報', uri: allUri } }] : []),
+  ...(shareUri ? [{ type: 'button', style: 'link', height: 'sm', color: t.muted, action: { type: 'uri', label: '轉傳給其他群組或朋友', uri: shareUri } }] : []) ] });
+const allUrl = (pid, wk) => DEMO ? `${location.origin}${location.pathname}?demo&all=1&p=${pid}&w=${wk}` : fwdUrl(`all=1&p=${encodeURIComponent(pid)}&w=${wk}`);
 const fwdUrl = q => `https://liff.line.me/${LIFF_ID}?${q}`;
 
 /** 個人回報圖卡：版面跟大家原本貼的文字一樣，名單一人一行、代號靠右 */
@@ -1033,7 +1052,7 @@ function reportFlex(p, r) {
   });
   const bubble = { type: 'bubble', size: 'mega', styles: { body: { backgroundColor: t.paper }, footer: { backgroundColor: t.paper } },
     body: { type: 'box', layout: 'vertical', paddingAll: '20px', contents: body },
-    footer: flexBtn('我也要回報', reportUrl(p.id, r.week), t, fwdUrl(`fwd=r&p=${encodeURIComponent(p.id)}&w=${r.week}&r=${encodeURIComponent(r.id)}`)) };
+    footer: flexBtn('我也要回報', reportUrl(p.id, r.week), t, fwdUrl(`fwd=r&p=${encodeURIComponent(p.id)}&w=${r.week}&r=${encodeURIComponent(r.id)}`), allUrl(p.id, r.week)) };
   const photo = p.fields.filter(f => f.type === 'photo').flatMap(f => (r.data || {})[f.id] || []).find(isHttps);
   if (photo) bubble.hero = { type: 'image', url: photo, size: 'full', aspectRatio: '20:13', aspectMode: 'cover' };
   return { type: 'flex', altText: `${r.name} 回報了 ${weekLabel(r.week)}「${p.title}」`.slice(0, 400), contents: bubble };
@@ -1073,7 +1092,7 @@ function remindFlex(p, wk, reps, missing, total) {
   }
   return { type: 'flex', altText: `【回報提醒】${p.title} ${weekLabel(wk)}，截止 ${dueLabel(wk, p.dueTime)}`.slice(0, 400),
     contents: { type: 'bubble', styles: { body: { backgroundColor: t.paper }, footer: { backgroundColor: t.paper } },
-      body: { type: 'box', layout: 'vertical', paddingAll: '20px', contents: body }, footer: flexBtn('填寫回報', reportUrl(p.id, wk), t, fwdUrl(`fwd=m&p=${encodeURIComponent(p.id)}&w=${wk}`)) } };
+      body: { type: 'box', layout: 'vertical', paddingAll: '20px', contents: body }, footer: flexBtn('填寫回報', reportUrl(p.id, wk), t, fwdUrl(`fwd=m&p=${encodeURIComponent(p.id)}&w=${wk}`), allUrl(p.id, wk)) } };
 }
 
 /** 提醒卡的網頁預覽（內容與 remindFlex 相同） */
@@ -1195,9 +1214,9 @@ const TOUR_STEPS = [
     text: '進行中的回報項目都在這裡，顯示這次要回報哪一週、截止時間、你交了沒。點一下就能填寫。' },
   { since: 1, tab: 'mine', target: () => q1('.page-foot .mydata-link:last-child'), title: '我的資料',
     text: '姓名、專區、校園等資料填一次就記住。想改名字或資料、或刪除自己的資料，都在這裡。' },
-  { since: 1, admin: true, tab: 'admin', target: () => q1('#new-proj'), title: '建立回報項目',
-    text: '管理員在這裡建立持續數週的回報項目：期間、提醒與截止時間、要回報哪些欄位（名單幾格、代號）都可以設定。' },
-  { since: 1, admin: true, tab: 'admin', target: () => q1('[data-proj]'), title: '每週提醒與統計',
+  { since: 1, tab: 'admin', target: () => q1('#new-proj'), title: '建立回報項目',
+    text: '每個人都能建立持續數週的回報項目，成為負責人：期間、提醒與截止時間、要回報哪些欄位（名單格數、代號）都可以設定。' },
+  { since: 1, tab: 'admin', target: () => q1('[data-proj]'), title: '每週提醒與統計',
     text: '點進項目可以看每週誰交了、誰還沒交，一鍵把提醒卡貼到群組；還有依專區、校園的彙整、趨勢圖和匯出 Excel。' },
   { since: 1, tab: 'mine', target: () => q1('#help'), title: '隨時重看教學',
     text: '填好的回報會以你的名義貼到群組，大家都看得到。忘記怎麼用時，按這個「?」再看一次。' },
