@@ -840,7 +840,7 @@ function reportForm() {
   }
   R.data = dataFrom(p, R.mine && R.mine.data, R.profile);
   const hasLastList = R.last && p.fields.some(f => f.type === 'list' && listItems((R.last.data || {})[f.id]).length);
-  view(`<section class="solo" style="padding-top:20px">
+  view(`${subbar('首頁', '')}<section class="solo" style="padding-top:0">
     <div class="week-bar"><select class="inp" id="wk" aria-label="回報哪一週">${R.weeks.map(w => `<option value="${w.week}" ${w.week === R.week ? 'selected' : ''}>${weekLabel(w.week)}${w.done ? '　✓ 已回報' : ''}</option>`).join('')}</select></div>
     <p class="due">截止：<b>${dueLabel(R.week, p.dueTime)}</b></p>
     ${R.mine ? `<p class="note-ok">你已經回報過這一週，修改後再按一次送出即可。</p>` : ''}
@@ -856,6 +856,7 @@ function reportForm() {
     <footer class="page-foot"><a class="mydata-link" href="#" id="my-hist">我的回報紀錄</a><a class="mydata-link" href="#" id="week-all">本週大家的回報</a>${myDataLinkInline()}</footer>
   </section>`);
   drawFields();
+  $('back').onclick = goHome;
   if ($('del-mine')) $('del-mine').onclick = () => deleteMine($('del-mine'), R.mine);
   $('wk').onchange = () => reportFlow(p.id, $('wk').value);
   if ($('carry')) $('carry').onclick = () => {
@@ -976,7 +977,7 @@ async function submitReport() {
 /** 送出後：蓋章、顯示回報內容、自動在群組貼出回報圖卡 */
 function resultView(rep, justSent, updated, extra = {}) {
   const p = R.project;
-  view(`<section class="solo">
+  view(`${subbar('首頁', '')}<section class="solo" style="padding-top:8px">
     ${ticket({ ...p, desc: '' }, `<div class="result-msg">
       <p>${esc(rep.name)}，${weekLabel(rep.week)} ${updated ? '的回報已更新' : justSent ? '回報完成' : '已經回報了'}。</p>
       ${extra.memberCount ? `<p class="muted">這週已有 ${extra.submitted}／${extra.memberCount} 人回報。</p>` : ''}
@@ -989,6 +990,7 @@ function resultView(rep, justSent, updated, extra = {}) {
     <button class="btn cancel" id="del-mine" style="margin-top:10px">刪除這週的回報</button>
     <footer class="page-foot"><a class="mydata-link" href="#" id="my-hist">我的回報紀錄</a><a class="mydata-link" href="#" id="week-all">本週大家的回報</a></footer>
   </section>`);
+  $('back').onclick = goHome;
   $('del-mine').onclick = () => deleteMine($('del-mine'), rep);
   $('copy').onclick = () => copyText(reportText(p, rep), '已複製，可以貼到任何地方');
   $('edit').onclick = () => { R.mine = rep; R.week = rep.week; reportForm(); };
@@ -1067,6 +1069,9 @@ async function weekAllFlow(pid, wk) {
   $('back').onclick = () => reportFlow(pid, wk);
   bindRepCards(p, reps, () => weekAllFlow(pid, wk));
 }
+
+/** 回到首頁的「我的回報」 */
+function goHome() { TAB = 'mine'; homeFlow(); }
 
 /** 刪除自己這週的回報：按兩次確認；群組裡已經貼出的圖卡無法收回 */
 function deleteMine(btn, rep) {
