@@ -432,3 +432,14 @@ function testRemindMail() {
   if (!p) throw new Error('還沒有進行中的項目');
   sendRemindMail(p, defaultWeek(p));
 }
+
+/** 第一次設定用：管理員還沒有人時，把最早從 LINE 登入平台的人（「登入」工作表第一筆）設為管理員。只有試算表擁有者能在 Apps Script 執行 */
+function addFirstAdmin() {
+  const adm = sheet(SH.ADMINS);
+  if (adm.getLastRow() > 1) { Logger.log('已經有管理員了：' + adm.getRange(2, 1, adm.getLastRow() - 1, 2).getValues().map(r => r.join(' ')).join('、')); return; }
+  const s = rows(SESSION_SHEET)[0];
+  if (!s) throw new Error('還沒有人登入過平台，請先從 LINE 打開平台一次');
+  const uid = String(s[1]), prof = profileOf(uid);
+  adm.appendRow([uid, prof.name || String(s[2]), Session.getEffectiveUser().getEmail()]);
+  Logger.log('已設為管理員：' + (prof.name || s[2]) + ' ' + uid);
+}
