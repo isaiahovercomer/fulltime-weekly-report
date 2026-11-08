@@ -690,14 +690,13 @@ function editProject(p) {
 
 function drawFieldEditor() {
   $('pj-fields').innerHTML = PD.fields.map((f, i) => `<div class="fcard" data-fi="${i}">
-    <div class="top">
-      <select class="inp" data-ftype="${i}" aria-label="欄位類型">${Object.entries(FIELD_TYPES).map(([k, v]) => `<option value="${k}" ${f.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
-      <input class="inp" data-flabel="${i}" value="${esc(f.label)}" placeholder="欄位名稱" maxlength="30">
-      <span class="ctl"><button type="button" data-up="${i}" aria-label="上移" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" data-down="${i}" aria-label="下移" ${i === PD.fields.length - 1 ? 'disabled' : ''}>↓</button><button type="button" data-delf="${i}" aria-label="刪除欄位">×</button></span>
-    </div>
-    ${f.type === 'list' ? `<div class="sub"><span>預設幾格</span><input class="inp" type="number" inputmode="numeric" min="1" max="30" list="slot-opts" data-slots="${i}" value="${+f.slots || 1}" style="max-width:7em">
-      <span>代號（選填）</span><input class="inp" data-tags="${i}" value="${esc((f.tags || []).join('/'))}" placeholder="例如 A追求/B禱告/C出訪"></div>
-      <p class="hint">代號用「/」分開，填的人可以複選；名單上只顯示第一個字母，例如「甘樂與A」。</p>` : ''}
+    <div class="head"><span class="no">第 ${i + 1} 項</span>
+      <span class="ctl"><button type="button" data-up="${i}" aria-label="上移" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" data-down="${i}" aria-label="下移" ${i === PD.fields.length - 1 ? 'disabled' : ''}>↓</button><button type="button" data-delf="${i}" aria-label="刪除欄位">刪除</button></span></div>
+    <label class="field"><span>欄位名稱</span><input class="inp" data-flabel="${i}" value="${esc(f.label)}" placeholder="例如 青少年家聚會數" maxlength="30"></label>
+    <label class="field"><span>類型</span><select class="inp" data-ftype="${i}">${Object.entries(FIELD_TYPES).map(([k, v]) => `<option value="${k}" ${f.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+    ${f.type === 'list' ? `<label class="field"><span>預設幾格（可下拉選或直接打數字）</span><input class="inp" type="number" inputmode="numeric" min="1" max="30" list="slot-opts" data-slots="${i}" value="${+f.slots || 1}" style="max-width:9em"></label>
+      <label class="field"><span>代號（選填，可複選）</span><input class="inp" data-tags="${i}" value="${esc((f.tags || []).join('/'))}" placeholder="例如 A追求/B禱告/C出訪"></label>
+      <p class="hint">代號用「/」分開；名單上只顯示第一個字母，例如「甘樂與A」。</p>` : ''}
     ${f.type === 'info' ? '<p class="hint">每個人填一次就記住，下週自動帶入，例如專區、校園。</p>' : ''}
   </div>`).join('') + `<datalist id="slot-opts">${[1, 2, 3, 4, 5, 6, 8, 10].map(n => `<option value="${n}">`).join('')}</datalist>`;
   const F = i => PD.fields[+i];
@@ -709,7 +708,7 @@ function drawFieldEditor() {
   $$('[data-up]').forEach(b => b.onclick = () => move(+b.dataset.up, -1));
   $$('[data-down]').forEach(b => b.onclick = () => move(+b.dataset.down, 1));
   $$('[data-delf]').forEach(b => b.onclick = () => {
-    if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = '刪'; setTimeout(() => { if (b.isConnected) { b.classList.remove('armed'); b.textContent = '×'; } }, 3000); return; }
+    if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = '確定？'; setTimeout(() => { if (b.isConnected) { b.classList.remove('armed'); b.textContent = '刪除'; } }, 3000); return; }
     PD.fields.splice(+b.dataset.delf, 1); drawFieldEditor();
   });
 }

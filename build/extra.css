@@ -72,13 +72,16 @@
   table.agg tr.total td { font-weight: 700; border-top: 2px solid var(--rule); }
   table.agg td.link { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 
-  .fcard { background: var(--paper); border-radius: 14px; padding: 12px; margin-bottom: 10px; border-left: 5px solid var(--marigold); }
-  .fcard .top { display: grid; grid-template-columns: 7.5em minmax(0, 1fr) auto; gap: 8px; align-items: center; }
-  .fcard .ctl { display: flex; gap: 4px; }
-  .fcard .ctl button { width: 36px; height: 44px; border: 1.5px solid var(--rule); background: var(--paper); border-radius: 10px; cursor: pointer; color: var(--ink-2); font-size: 15px; }
+  .fcard { background: var(--paper); border-radius: 14px; padding: 12px 14px 4px; margin-bottom: 12px; border-left: 5px solid var(--marigold); }
+  .fcard .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .fcard .no { font-family: var(--serif); font-weight: 900; color: var(--gold-text); }
+  .fcard .ctl { display: flex; gap: 6px; }
+  .fcard .ctl button { min-width: 44px; height: 40px; padding: 0 10px; border: 1.5px solid var(--rule); background: var(--paper); border-radius: 10px; cursor: pointer; color: var(--ink-2); font-size: 15px; }
+  .fcard .ctl button:disabled { opacity: .35; }
+  .fcard .ctl button[data-delf] { color: var(--stamp); border-color: rgba(176,58,46,.35); }
   .fcard .ctl button.armed { background: var(--stamp); color: #fff; border-color: var(--stamp); }
-  .fcard .sub { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: 8px; margin-top: 8px; align-items: center; font-size: 14px; color: var(--ink-2); }
-  .fcard .hint { font-size: 12px; color: var(--ink-2); margin: 6px 0 0; }
+  .fcard .field > span { font-size: 13px; }
+  .fcard .hint { font-size: 12px; color: var(--ink-2); margin: -2px 0 10px; }
   .add-field { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
 
   .proj-card .d b { color: var(--ink); }
