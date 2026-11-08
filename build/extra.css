@@ -99,3 +99,11 @@
     .print-title { display: block !important; }
   }
   .print-title { display: none; font-family: var(--serif); font-size: 22px; margin: 0 0 10px; }
+
+  /* 建立項目的預覽 */
+  #pj-pv-wrap { margin: 4px 0 22px; scroll-margin-top: 12px; }
+  .pv-tabs { display: inline-flex; border: 1.5px solid var(--rule); border-radius: 10px; overflow: hidden; margin: 0 2px 12px; background: var(--paper); }
+  .pv-tabs button { border: 0; background: transparent; padding: 7px 16px; font-size: 14px; color: var(--ink-2); cursor: pointer; }
+  .pv-tabs button[aria-selected="true"] { background: var(--ink); color: var(--chrome-fg); font-weight: 700; }
+  #pj-pv .inp:disabled, #pj-pv .li input:disabled, #pj-pv textarea:disabled { opacity: 1; -webkit-text-fill-color: var(--ink-2); }
+  #pj-pv .rform { padding-top: 14px; }

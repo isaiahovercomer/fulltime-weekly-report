@@ -447,6 +447,14 @@
     .print-title { display: block !important; }
   }
   .print-title { display: none; font-family: var(--serif); font-size: 22px; margin: 0 0 10px; }
+
+  /* 建立項目的預覽 */
+  #pj-pv-wrap { margin: 4px 0 22px; scroll-margin-top: 12px; }
+  .pv-tabs { display: inline-flex; border: 1.5px solid var(--rule); border-radius: 10px; overflow: hidden; margin: 0 2px 12px; background: var(--paper); }
+  .pv-tabs button { border: 0; background: transparent; padding: 7px 16px; font-size: 14px; color: var(--ink-2); cursor: pointer; }
+  .pv-tabs button[aria-selected="true"] { background: var(--ink); color: var(--chrome-fg); font-weight: 700; }
+  #pj-pv .inp:disabled, #pj-pv .li input:disabled, #pj-pv textarea:disabled { opacity: 1; -webkit-text-fill-color: var(--ink-2); }
+  #pj-pv .rform { padding-top: 14px; }
 </style>
 </head>
 <body>
@@ -830,6 +838,7 @@ function reportForm() {
     <form class="rform" id="rform" style="${themeVars(t)}" novalidate>
       <p class="who">【${esc(R.profile.name)}】</p>
       <p class="proj">${esc(p.title)}・${weekLabel(R.week)}</p>
+      ${p.desc ? `<p class="proj" style="margin-top:-8px">${esc(p.desc)}</p>` : ''}
       ${hasLastList && !R.mine ? `<button type="button" class="btn plain small carry" id="carry">帶入上週（${weekLabel(R.last.week)}）的名單</button>` : ''}
       <div id="fields"></div>
     </form>
@@ -1106,6 +1115,11 @@ function editProject(p) {
   const isNew = !p;
   PD = p ? JSON.parse(JSON.stringify(p)) : { title: '全時間工作重點回報', desc: '每週一中午前，回報上一週（週一～週日）的重點。', start: ymd(mondayOf(new Date())), end: '', remindDay: 0, remindTime: '20:00', dueTime: '12:00', theme: 'youth', fields: DEFAULT_FIELDS() };
   view(`${subbar(isNew ? '返回' : '返回項目', isNew ? '建立回報項目' : '編輯項目')}
+    <section class="pv-panel" id="pj-pv-wrap">
+      <div class="pv-label"><span class="tag">預覽</span><small>下面每改一個地方，這裡會跟著更新</small></div>
+      <div class="pv-tabs" role="tablist"><button type="button" role="tab" data-pv="form" aria-selected="${PV === 'form'}">填寫頁</button><button type="button" role="tab" data-pv="remind" aria-selected="${PV === 'remind'}">群組提醒卡</button></div>
+      <div id="pj-pv"></div>
+    </section>
     <div class="group"><label class="field"><span>項目名稱</span><input class="inp" id="pj-title" maxlength="40" value="${esc(PD.title)}"></label>
       <label class="field"><span>說明（顯示在填寫頁）</span><textarea class="inp" id="pj-desc" rows="2" maxlength="200">${esc(PD.desc)}</textarea></label></div>
     <div class="group"><h2>期間</h2><div class="row2">
@@ -1120,15 +1134,18 @@ function editProject(p) {
     <div class="group"><h2>圖卡色調</h2><div class="tones" role="radiogroup">${Object.entries(THEMES).map(([k, t]) => `<button type="button" role="radio" aria-checked="${PD.theme === k}" data-theme="${k}" style="--sw:${t.btn};--sw2:${t.notch}"><i></i>${t.name}</button>`).join('')}</div></div>
     <div class="group"><h2>回報欄位</h2><p style="font-size:13px;color:var(--ink-2);margin:-4px 0 10px">照順序顯示在填寫頁和群組圖卡上。名單可以設定預設幾格（填的人還能再加），和可複選的代號。</p>
       <div id="pj-fields"></div>
-      <div class="add-field">${Object.entries(FIELD_TYPES).map(([k, v]) => `<button type="button" class="chip" data-addf="${k}">＋ ${v}</button>`).join('')}</div></div>
+      <div class="add-field">${Object.entries(FIELD_TYPES).map(([k, v]) => `<button type="button" class="chip" data-addf="${k}">＋ ${v}</button>`).join('')}</div>
+      <a class="mydata-link" href="#pj-pv-wrap" id="to-pv" style="margin-top:6px">↑ 回到上面看預覽</a></div>
     ${isNew ? '' : `<div class="group"><h2>停止或刪除</h2>
       <button class="btn plain" id="pj-open">${PD.open ? '停止回報' : '重新開放回報'}</button>
       <button class="btn cancel" id="pj-del" style="margin-top:10px">刪除這個項目</button>
       <p style="font-size:12px;color:var(--ink-2)">刪除項目時，所有回報紀錄也會一起刪除，無法復原。只想暫停請用「停止回報」。</p></div>`}
     <div class="dock"><div class="inner"><button class="btn send" id="pj-save">${isNew ? '建立項目' : '儲存'}</button></div></div>`);
   drawFieldEditor();
+  $$('[data-pv]').forEach(b => b.onclick = () => { PV = b.dataset.pv; $$('[data-pv]').forEach(x => x.setAttribute('aria-selected', x === b)); drawPreview(); });
+  ['pj-title', 'pj-desc', 'pj-due'].forEach(id => $(id).addEventListener('input', () => { PD.title = $('pj-title').value; PD.desc = $('pj-desc').value; PD.dueTime = $('pj-due').value || '12:00'; drawPreview(); }));
   $('back').onclick = () => isNew ? renderHome() : openProject(p.id, 'settings');
-  $$('[data-theme]').forEach(b => b.onclick = () => { PD.theme = b.dataset.theme; $$('[data-theme]').forEach(x => x.setAttribute('aria-checked', x === b)); });
+  $$('[data-theme]').forEach(b => b.onclick = () => { PD.theme = b.dataset.theme; $$('[data-theme]').forEach(x => x.setAttribute('aria-checked', x === b)); drawPreview(); });
   $$('[data-addf]').forEach(b => b.onclick = () => {
     const type = b.dataset.addf;
     PD.fields.push({ id: newId(), type, label: '', slots: type === 'list' ? 3 : undefined, tags: type === 'list' ? [] : undefined });
@@ -1141,7 +1158,43 @@ function editProject(p) {
   if ($('pj-del')) $('pj-del').onclick = () => armThen($('pj-del'), '確定刪除？所有回報都會刪除，再按一次', async () => {
     await api('deleteProject', { projectId: p.id }); toast('已刪除'); await reloadProjects(); TAB = 'admin'; renderHome();
   });
+  $('to-pv').onclick = e => { e.preventDefault(); $('pj-pv-wrap').scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth' }); };
   $('pj-save').onclick = () => saveProject(isNew, p);
+}
+
+/** 建立項目時的預覽：填寫頁或群組提醒卡 */
+let PV = 'form';
+function previewWeek() { const n = new Date(), wd = n.getDay(); let w = mondayOf(n); if (!(wd === 6 || wd === 0)) w = addDays(w, -7); return ymd(w); }
+function drawPreview() {
+  const box = $('pj-pv');
+  if (!box || !PD) return;
+  const p = { ...PD, title: PD.title || '回報項目名稱', fields: PD.fields.filter(f => String(f.label || '').trim()) };
+  const wk = previewWeek();
+  box.innerHTML = PV === 'remind' ? remindPreview(p, wk, [], [], 0) : formPreview(p, wk);
+}
+/** 填寫頁的樣子（不能輸入，只是看） */
+function formPreview(p, wk) {
+  const infos = p.fields.filter(f => f.type === 'info');
+  const lab = t => `<span style="font-weight:700;color:var(--ink);font-size:15px">${esc(t)}</span>`;
+  let h = '';
+  if (infos.length) h += `<div class="group"><div class="info-row" style="${infos.length === 1 ? 'grid-template-columns:1fr' : ''}">${infos.map(f => `<label class="field"><span>${esc(f.label)}</span><input class="inp" disabled placeholder="${esc(f.label)}"></label>`).join('')}</div><p class="remember">這些會記住，下次自動帶入，也可以隨時改。</p></div>`;
+  p.fields.forEach(f => {
+    if (f.type === 'number') h += `<div class="group"><label class="field">${lab(f.label)}<input class="inp num" disabled placeholder="0"></label></div>`;
+    else if (f.type === 'list') {
+      const tags = f.tags || [];
+      h += `<div class="group"><h2>${esc(f.label)}<small>預設 ${+f.slots || 1} 格</small></h2>${tags.length ? `<p class="legend">${tags.map(esc).join('／')}（可複選）</p>` : ''}
+        ${Array.from({ length: Math.min(+f.slots || 1, 30) }, (_, i) => `<div class="li"><span class="no">${i + 1}.</span><input disabled>${tags.length ? `<span class="tagset">${tags.map(t => `<button type="button" tabindex="-1" aria-pressed="false">${esc(tagCode(t))}</button>`).join('')}</span>` : '<span></span>'}</div>`).join('')}
+        <div class="add-slot" style="text-align:center">＋ 再加一格</div></div>`;
+    } else if (f.type === 'text') h += `<div class="group"><label class="field">${lab(f.label)}<textarea class="inp" disabled rows="2"></textarea></label></div>`;
+    else if (f.type === 'photo') h += `<div class="group"><h2>${esc(f.label)}<small>最多 ${MAX_PHOTOS} 張</small></h2><span class="btn plain small">上傳照片</span></div>`;
+  });
+  return `<p class="due" style="margin:0 0 8px">${weekLabel(wk)}・截止：<b>${dueLabel(wk, p.dueTime)}</b></p>
+    <div class="rform" style="${themeVars(themeOf(p))};box-shadow:none">
+      <p class="who">【你的名字】</p><p class="proj">${esc(p.title)}・${weekLabel(wk)}</p>
+      ${p.desc ? `<p class="proj" style="margin-top:-8px">${esc(p.desc)}</p>` : ''}
+      ${h || '<p class="empty" style="padding:20px 0">還沒有欄位</p>'}
+      <span class="btn send" style="display:block;text-align:center;margin:4px 0 12px;background:var(--line)">送出回報</span>
+    </div>`;
 }
 
 function drawFieldEditor() {
@@ -1157,9 +1210,10 @@ function drawFieldEditor() {
   </div>`).join('') + `<datalist id="slot-opts">${[1, 2, 3, 4, 5, 6, 8, 10].map(n => `<option value="${n}">`).join('')}</datalist>`;
   const F = i => PD.fields[+i];
   $$('[data-ftype]').forEach(el => el.onchange = () => { const f = F(el.dataset.ftype); f.type = el.value; if (f.type === 'list') { f.slots = f.slots || 3; f.tags = f.tags || []; } drawFieldEditor(); });
-  $$('[data-flabel]').forEach(el => el.oninput = () => { F(el.dataset.flabel).label = el.value; });
-  $$('[data-slots]').forEach(el => el.oninput = () => { F(el.dataset.slots).slots = Math.min(30, Math.max(1, parseInt(el.value, 10) || 1)); });
-  $$('[data-tags]').forEach(el => el.oninput = () => { F(el.dataset.tags).tags = el.value.split(/[\/／,，、]/).map(s => s.trim()).filter(Boolean).slice(0, 6); });
+  $$('[data-flabel]').forEach(el => el.oninput = () => { F(el.dataset.flabel).label = el.value; drawPreview(); });
+  $$('[data-slots]').forEach(el => el.oninput = () => { F(el.dataset.slots).slots = Math.min(30, Math.max(1, parseInt(el.value, 10) || 1)); drawPreview(); });
+  $$('[data-tags]').forEach(el => el.oninput = () => { F(el.dataset.tags).tags = el.value.split(/[\/／,，、]/).map(s => s.trim()).filter(Boolean).slice(0, 6); drawPreview(); });
+  drawPreview();
   const move = (i, d) => { const a = PD.fields; [a[i], a[i + d]] = [a[i + d], a[i]]; drawFieldEditor(); };
   $$('[data-up]').forEach(b => b.onclick = () => move(+b.dataset.up, -1));
   $$('[data-down]').forEach(b => b.onclick = () => move(+b.dataset.down, 1));
@@ -1232,7 +1286,7 @@ function renderWeekTab() {
     <div class="week-bar"><select class="inp" id="swk">${S.weeks.map(w => `<option value="${w}" ${w === wk ? 'selected' : ''}>${weekLabel(w)}${w === S.defaultWeek ? '（本次）' : ''}</option>`).join('')}</select></div>
     <p class="due">截止：<b>${dueLabel(wk, p.dueTime)}</b></p>
     <div class="facts three"><div class="fact"><small>已回報</small><b>${reps.length}</b></div><div class="fact"><small>未回報</small><b>${missing.length}</b></div><div class="fact"><small>逾期</small><b>${late}</b></div></div>
-    <details class="rep" style="margin-top:12px"><summary><span class="nm">提醒卡預覽</span><span class="mt">群組裡看到的樣子</span></summary><div class="body">${remindPreview(p, wk, reps, missing)}</div></details>
+    <details class="rep" style="margin-top:12px"><summary><span class="nm">提醒卡預覽</span><span class="mt">群組裡看到的樣子</span></summary><div class="body">${remindPreview(p, wk, reps, missing, S.members.length)}</div></details>
     <button class="btn send" id="remind" style="margin-top:12px">${missing.length ? `發提醒到群組（${missing.length} 人未交）` : '發提醒到群組'}</button>
     <div class="btn-row"><button class="btn plain" id="copy-link">複製填寫連結</button><button class="btn plain" id="print">列印／存 PDF</button></div>
     ${missing.length ? `<div class="sec-h"><h2>未回報</h2></div><div class="miss">${missing.map(m => `<span>${esc(m.name)}</span>`).join('')}</div>` : (reps.length ? '<p class="posted" style="margin-top:14px">這週全部都回報了。</p>' : '')}
@@ -1455,12 +1509,12 @@ function remindFlex(p, wk, reps, missing) {
 }
 
 /** 提醒卡的網頁預覽（內容與 remindFlex 相同） */
-function remindPreview(p, wk, reps, missing) {
+function remindPreview(p, wk, reps, missing, total) {
   const t = themeOf(p);
   return `<div class="ticket" style="${themeVars(t)};box-shadow:none;border:1.5px solid var(--rule)"><div class="main" style="padding:16px 18px 12px">
     <p style="margin:0;font-size:12px;font-weight:700;color:var(--line)">回報提醒</p>
     <h2 class="title" style="font-size:20px;margin:2px 0 10px">${esc(p.title)}</h2>
-    <dl><dt>週次</dt><dd><b>${weekLabel(wk)}</b></dd><dt>截止</dt><dd><b>${dueLabel(wk, p.dueTime)}</b></dd><dt>已交</dt><dd><b>${reps.length}／${S.members.length} 人</b></dd></dl>
+    <dl><dt>週次</dt><dd><b>${weekLabel(wk)}</b></dd><dt>截止</dt><dd><b>${dueLabel(wk, p.dueTime)}</b></dd><dt>已交</dt><dd><b>${reps.length}／${total} 人</b></dd></dl>
     <p style="margin:12px 0 4px;font-size:14px;font-weight:700;border-top:1px solid var(--rule);padding-top:10px">要回報的項目</p>
     <ol style="margin:0;padding-left:1.6em;font-size:14px;line-height:1.7">${reportItems(p).map(x => `<li>${esc(x)}</li>`).join('')}</ol>
     ${missing.length ? `<p style="margin:12px 0 4px;font-size:14px;font-weight:700;border-top:1px solid var(--rule);padding-top:10px">還沒回報（${missing.length}）</p><p style="margin:0;font-size:14px;color:var(--ink-2)">${missing.map(m => esc(m.name)).join('、')}</p>` : ''}
