@@ -320,6 +320,7 @@ function projectForUser(user, pid, week) {
     mine: mine.filter(r => r.week === wk)[0] || null,
     last: mine.filter(r => r.week < wk).sort(byWeekDesc)[0] || null,
     profile: profileOf(user.userId),
+    canManage: canManage(user.userId, pid),
   };
 }
 

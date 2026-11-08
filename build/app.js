@@ -215,7 +215,7 @@ async function demoApi(action, d) {
       if (DEMO_MODE === 'done' && !mineAll.some(r => r.week === wk)) demo.reports.push({ id: 'Rme', week: wk, userId: me, name: prof().name, time: '11/2 09:12', late: false, data: { f1: '復興', f2: '台中一中', f3: 6, f4: [{ n: '黃柏翰', t: ['A追求', 'C出訪'] }, { n: '李品睿', t: ['B禱告'] }], f5: [{ n: '蔡宜庭', t: [] }], f6: [], f7: [{ n: '黃柏翰', t: [] }], f8: '', f9: [] } });
       const mine = demo.reports.find(r => r.userId === me && r.week === wk) || null;
       const last = demo.reports.filter(r => r.userId === me && r.week < wk).sort((a, b) => b.week.localeCompare(a.week))[0] || null;
-      return { ok: true, project: p, week: wk, weeks: weeks.map(w => ({ week: w, done: mineAll.some(r => r.week === w) || (mine && w === wk) })), mine, last, profile: prof() };
+      return { ok: true, canManage: demo.me.isAdmin || p.ownerId === me, project: p, week: wk, weeks: weeks.map(w => ({ week: w, done: mineAll.some(r => r.week === w) || (mine && w === wk) })), mine, last, profile: prof() };
     }
     case 'saveProfile': demo.people[me] = { name: String(d.name || '').trim(), info: { ...prof().info, ...(d.info || {}) } }; if (!demo.people[me].name) throw new Error('請填寫姓名'); return { ok: true, profile: demo.people[me] };
     case 'submit': {
@@ -374,7 +374,7 @@ function reportForm() {
   }
   R.data = dataFrom(p, R.mine && R.mine.data, R.profile);
   const hasLastList = R.last && p.fields.some(f => f.type === 'list' && listItems((R.last.data || {})[f.id]).length);
-  view(`${subbar('首頁', '')}<section class="solo" style="padding-top:0">
+  view(`${subbar('首頁', '')}${R.canManage ? `<button class="btn plain small" id="manage" style="margin:-6px 0 12px">管理這個項目（每週、彙整、提醒）›</button>` : ''}<section class="solo" style="padding-top:0">
     <div class="week-bar"><select class="inp" id="wk" aria-label="回報哪一週">${R.weeks.map(w => `<option value="${w.week}" ${w.week === R.week ? 'selected' : ''}>${weekLabel(w.week)}${w.done ? '　✓ 已回報' : ''}</option>`).join('')}</select></div>
     <p class="due">截止：<b>${dueLabel(R.week, p.dueTime)}</b></p>
     ${R.mine ? `<p class="note-ok">你已經回報過這一週，修改後再按一次送出即可。</p>` : ''}
@@ -391,6 +391,7 @@ function reportForm() {
   </section>`);
   drawFields();
   $('back').onclick = goHome;
+  if ($('manage')) $('manage').onclick = () => openProject(p.id, 'week');
   if ($('del-mine')) $('del-mine').onclick = () => deleteMine($('del-mine'), R.mine);
   $('wk').onchange = () => reportFlow(p.id, $('wk').value);
   if ($('carry')) $('carry').onclick = () => {
@@ -668,11 +669,11 @@ function renderMine() {
     <button class="stub-card proj-card" data-open="${p.id}" style="${themeVars(themeOf(p))};border-left:6px solid var(--line)">
       <div class="info"><div class="t">${esc(p.title)}</div>
         <div class="d">${weekLabel(p.defaultWeek)}・截止 <b>${dueLabel(p.defaultWeek, p.dueTime)}</b>${p.owner ? `・負責人 ${esc(p.owner)}` : ''}</div>
-        ${p.mineDone ? '<span class="pill ok">已回報</span>' : '<span class="pill todo">還沒回報</span>'}</div>
+        ${p.mineDone ? '<span class="pill ok">已回報</span>' : '<span class="pill todo">還沒回報</span>'}${p.canManage ? ` <span class="pill manage" data-manage="${p.id}" role="button" tabindex="0">管理 ›</span>` : ''}</div>
       <div class="count"><b>${p.submitted}</b><small>／${p.memberCount} 人已交</small></div>
     </button>`).join('')}</div>`
     : `<div class="empty"><p>目前沒有進行中的回報項目。</p><p class="muted">項目負責人會在群組貼出提醒，點提醒就能填寫。也可以到「我負責的項目」自己建立一個。</p></div>`;
-  $$('[data-open]').forEach(b => b.onclick = () => reportFlow(b.dataset.open));
+  $$('[data-open]').forEach(b => b.onclick = e => { const m = e.target.closest('[data-manage]'); m ? openProject(m.dataset.manage, 'week') : reportFlow(b.dataset.open); });
 }
 
 /** 我負責的項目：點進去管理；按「選取」可以勾選好幾個一次刪除 */
