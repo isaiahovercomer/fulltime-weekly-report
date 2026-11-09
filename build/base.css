@@ -17,7 +17,7 @@
     --stamp: #B03A2E;      /* 印章、刪除（磚紅） */
     --shadow: 0 1px 2px rgba(60, 40, 20, .05), 0 8px 24px rgba(60, 40, 20, .08);
     --serif: "Noto Serif TC", "Songti TC", serif;
-    --sans: "Noto Sans TC", -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+    --sans: -apple-system, "PingFang TC", "Noto Sans TC", "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--sky); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.6; -webkit-text-size-adjust: 100%; }

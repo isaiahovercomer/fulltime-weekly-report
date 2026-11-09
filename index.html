@@ -15,7 +15,7 @@
 <title>全時間工作重點回報</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
   :root {
@@ -37,7 +37,7 @@
     --stamp: #B03A2E;      /* 印章、刪除（磚紅） */
     --shadow: 0 1px 2px rgba(60, 40, 20, .05), 0 8px 24px rgba(60, 40, 20, .08);
     --serif: "Noto Serif TC", "Songti TC", serif;
-    --sans: "Noto Sans TC", -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+    --sans: -apple-system, "PingFang TC", "Noto Sans TC", "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--sky); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.6; -webkit-text-size-adjust: 100%; }
@@ -477,7 +477,8 @@ const DEMO_MODE = PARAMS.get('demo') || '';
 
 const $app = document.getElementById('app');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const view = html => { $app.innerHTML = html; window.scrollTo(0, 0); };
+let NAV = 0; // 每換一次畫面加 1；背景抓到新資料時，只在使用者還停在同一個畫面才重畫
+const view = html => { NAV++; $app.innerHTML = html; window.scrollTo(0, 0); };
 const $ = id => document.getElementById(id);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 const loading = () => `<div class="loading" role="status"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>`;
@@ -662,7 +663,7 @@ function demoWeeks(p) {
 if (DEMO) window.liff = { isInClient: () => false, closeWindow() {}, isApiAvailable: () => false, getContext: () => null, isLoggedIn: () => true };
 
 async function demoApi(action, d) {
-  await sleep(250);
+  await sleep(PARAMS.has('slow') && action !== 'listProjects' ? 1800 : 250); // ?slow 模擬真實後端的速度
   const me = demo.me.userId;
   const P = id => demo.projects.find(p => p.id === id);
   const prof = () => demo.people[me] || { name: '', info: {} };
@@ -671,6 +672,7 @@ async function demoApi(action, d) {
     reports: demo.reports.filter(r => (r.project || 'P1') === p.id) });
   switch (action) {
     case 'me': return { ok: true, ...demo.me, profile: prof() };
+    case 'home': return { ok: true, me: { ...demo.me, profile: prof() }, projects: (await demoApi('listProjects')).projects };
     case 'listProjects': return { ok: true, projects: demo.projects.map(p => {
       const wk = demoDefaultWeek(p), got = demo.reports.filter(r => r.week === wk);
       return { ...p, canManage: demo.me.isAdmin || p.ownerId === me, defaultWeek: wk, submitted: got.length, memberCount: (demo.members[p.id] || []).length, mineDone: got.some(r => r.userId === me), isMember: (demo.members[p.id] || []).includes(me) };
@@ -719,7 +721,19 @@ const getSession = () => { try { const s = JSON.parse(localStorage.getItem(SESSI
 const setSession = s => { try { s ? localStorage.setItem(SESSION_KEY, JSON.stringify({ token: s.token, expires: s.expires })) : localStorage.removeItem(SESSION_KEY); } catch (e) {} };
 
 async function api(action, data = {}) {
-  if (DEMO) return demoApi(action, data);
+  if (action === 'home' && !DEMO) {
+    // 後端還沒更新到有 home 的版本時，改成同時發 me 和 listProjects（並行，仍比依序快）
+    try { return await apiRaw('home', data); }
+    catch (e) {
+      if (!/未知的動作/.test(e.message)) throw e;
+      const [me, lp] = await Promise.all([apiRaw('me'), apiRaw('listProjects')]);
+      return { ok: true, me, projects: lp.projects };
+    }
+  }
+  return apiRaw(action, data);
+}
+async function apiRaw(action, data = {}) {
+  if (DEMO) { const r = await demoApi(action, data); if (!READS.has(action) && action !== 'uploadImage') afterWrite(data); return JSON.parse(JSON.stringify(r)); }
   const body = { action, ...data };
   const s = action === 'session' ? null : getSession();
   if (s) body.session = s.token; else body.idToken = liff.getIDToken();
@@ -728,14 +742,63 @@ async function api(action, data = {}) {
   if (!j.ok) {
     if (j.error === 'SESSION_EXPIRED') {
       setSession(null);
-      if (liff.isLoggedIn()) return api(action, data);
+      if (liff.isLoggedIn()) return apiRaw(action, data);
       liff.login({ redirectUri: location.href }); throw new Error('登入已過期，正在重新登入');
     }
     if (j.error === 'TOKEN_EXPIRED') { liff.logout(); liff.login({ redirectUri: location.href }); throw new Error('登入已過期，正在重新登入'); }
     throw new Error(j.error);
   }
+  if (!READS.has(action) && action !== 'session' && action !== 'uploadImage') afterWrite(data);
   return j;
 }
+
+/* ---------- 加速：先用上次的資料馬上顯示，背景再向後端拿最新的 ----------
+   後端（Google Apps Script）每次要 1～2 秒，所以讀取的結果存在手機裡；
+   打開畫面時先顯示上次的內容，新資料回來若有不同再更新畫面。送出、修改、刪除後清掉暫存。 */
+const READS = new Set(['home', 'project', 'projectStats', 'weekReports', 'myReports', 'myData']);
+const CACHE_KEY = 'report.cache.v1';
+let CACHE = {};
+try { const c = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}'); const tk = (getSession() || {}).token || ''; CACHE = c.owner === tk.slice(0, 12) ? c.data || {} : {}; } catch (e) { CACHE = {}; }
+let cacheTimer;
+function saveCache() {
+  clearTimeout(cacheTimer);
+  cacheTimer = setTimeout(() => {
+    try {
+      const keys = Object.keys(CACHE); while (keys.length > 40) delete CACHE[keys.shift()];
+      const str = JSON.stringify({ owner: ((getSession() || {}).token || '').slice(0, 12), data: CACHE });
+      if (str.length < 3e6) localStorage.setItem(CACHE_KEY, str); else localStorage.removeItem(CACHE_KEY);
+    } catch (e) {}
+  }, 300);
+}
+function clearCache() { CACHE = {}; INFLIGHT.clear(); saveCache(); }
+/** 送出、修改、刪除之後：清掉暫存，並馬上在背景重抓首頁和這個項目，回去時就不用等 */
+function afterWrite(data) {
+  clearCache();
+  const pid = data && data.projectId;
+  setTimeout(() => prefetch([['home', {}], ...(pid ? [['project', { projectId: pid, week: '' }]] : [])]), 0);
+}
+const INFLIGHT = new Map();
+const ckey = (action, data) => action + ':' + JSON.stringify(data || {});
+/** 讀取：有暫存就馬上回傳暫存，背景更新；onFresh(新資料) 只在內容真的變了才呼叫 */
+function apiCached(action, data = {}, onFresh) {
+  const k = ckey(action, data), old = CACHE[k];
+  let p = INFLIGHT.get(k);
+  if (!p) {
+    p = api(action, data).then(r => { CACHE[k] = r; saveCache(); return r; }).finally(() => INFLIGHT.delete(k));
+    INFLIGHT.set(k, p);
+  }
+  if (old === undefined) return p;
+  p.then(r => { if (onFresh && JSON.stringify(r) !== JSON.stringify(old)) onFresh(r); }).catch(() => {});
+  return Promise.resolve(old);
+}
+/** 背景先抓好，點進去時就不用等 */
+function prefetch(list) {
+  let i = 0;
+  const next = () => { if (i >= list.length) return; const [a, d] = list[i++]; if (CACHE[ckey(a, d)] === undefined) apiCached(a, d).catch(() => {}).finally(next); else next(); };
+  next(); next();
+}
+/** 背景新資料回來時，使用者還在同一個畫面才重畫 */
+const stillHere = nav => nav === NAV;
 
 /* ================= 入口 ================= */
 let ME = null;
@@ -746,14 +809,13 @@ async function main() {
       await liff.init({ liffId: LIFF_ID });
       PARAMS = new URLSearchParams(location.search); // LIFF 會把 liff.line.me 後面的參數放回網址
       if (!liff.isLoggedIn() && !getSession()) { liff.login({ redirectUri: location.href }); return; }
-      if (liff.isLoggedIn() && !getSession()) { try { setSession(await api('session')); } catch (e) {} }
+      if (liff.isLoggedIn() && !getSession()) api('session').then(setSession).catch(() => {}); // 不用等，背景建立 60 天通行證
     }
     if (PARAMS.has('mydata')) return myDataFlow();
-    if (PARAMS.get('all') && PARAMS.get('p')) { ME = await api('me'); return weekAllFlow(PARAMS.get('p'), PARAMS.get('w')); }
+    if (PARAMS.get('all') && PARAMS.get('p')) { loadMe(); return weekAllFlow(PARAMS.get('p'), PARAMS.get('w')); }
     if (PARAMS.get('fwd')) return forwardFlow(PARAMS.get('fwd'), PARAMS.get('p'), PARAMS.get('w'), PARAMS.get('r'));
-    ME = await api('me');
     const pid = PARAMS.get('p');
-    if (pid || ['report', 'first', 'done'].includes(DEMO_MODE)) return reportFlow(pid || 'P1', PARAMS.get('w'));
+    if (pid || ['report', 'first', 'done'].includes(DEMO_MODE)) { loadMe(); return reportFlow(pid || 'P1', PARAMS.get('w')); }
     await homeFlow();
     const rid = PARAMS.get('remind') || (DEMO_MODE === 'admin' ? 'P1' : '');
     if (rid) openProject(rid, 'week');
@@ -771,13 +833,19 @@ let R = null; // 目前的回報表單 { project, week, weeks, mine, last, profi
 
 async function reportFlow(pid, wk) {
   MANAGING = false;
-  view(loading());
-  const r = await api('project', { projectId: pid, week: wk });
-  R = r;
-  document.title = r.project.title;
-  if (!r.profile || !r.profile.name) return nameForm();
-  if (DEMO_MODE === 'done' && r.mine) return resultView(r.mine, false, false);
-  reportForm();
+  const key = { projectId: pid, week: wk || '' };
+  if (CACHE[ckey('project', key)] === undefined) view(loading());
+  let nav; const start = NAV;
+  const show = r => {
+    R = r;
+    document.title = r.project.title;
+    if (!r.profile || !r.profile.name) return nameForm();
+    if (DEMO_MODE === 'done' && r.mine) return resultView(r.mine, false, false);
+    reportForm();
+  };
+  const r = await apiCached('project', key, fresh => { if (stillHere(nav) && !(R && R.dirty)) { show(fresh); nav = NAV; } });
+  if (NAV !== start) return; // 等待時使用者已經去了別頁
+  show(r); nav = NAV;
 }
 
 /** 第一次使用：留下姓名（之後都記得，可以在「我的資料」修改） */
@@ -857,6 +925,8 @@ function reportForm() {
     <footer class="page-foot"><a class="mydata-link" href="#" id="my-hist">我的回報紀錄</a><a class="mydata-link" href="#" id="week-all">本週大家的回報</a>${myDataLinkInline()}</footer>
   </section>`);
   drawFields();
+  R.dirty = false;
+  ['input', 'click'].forEach(ev => $('rform').addEventListener(ev, e => { if (e.target.closest('input,textarea,select,button,label')) R.dirty = true; }));
   $('back').onclick = goHome;
   if ($('manage')) $('manage').onclick = () => openProject(p.id, 'week');
   if ($('del-mine')) $('del-mine').onclick = () => deleteMine($('del-mine'), R.mine);
@@ -1042,20 +1112,25 @@ async function pickAndSend(msg, done) {
 
 /** 自己的歷史回報 */
 async function historyFlow(pid) {
-  view(loading());
-  const r = await api('myReports', { projectId: pid });
+  if (CACHE[ckey('myReports', { projectId: pid })] === undefined) view(loading());
+  let nav; const start = NAV;
+  const r = await apiCached('myReports', { projectId: pid }, () => { if (stillHere(nav)) historyFlow(pid); });
+  if (NAV !== start) return;
   const p = r.project;
   view(`${subbar('返回', '我的回報紀錄')}
     <p class="summary">${esc(p.title)}・共 ${r.reports.length} 週</p>
     ${r.reports.length ? r.reports.map((x, i) => repCard(p, x, i === 0, true)).join('') : '<p class="empty">還沒有回報紀錄。</p>'}`);
+  nav = NAV;
   $('back').onclick = () => reportFlow(pid, R && R.week);
   bindRepCards(p, r.reports, () => historyFlow(pid));
 }
 
 /** 本週大家的回報（每週的文字大家都看得到） */
 async function weekAllFlow(pid, wk) {
-  view(loading());
-  const r = await api('weekReports', { projectId: pid, week: wk });
+  if (CACHE[ckey('weekReports', { projectId: pid, week: wk })] === undefined) view(loading());
+  let nav; const start = NAV;
+  const r = await apiCached('weekReports', { projectId: pid, week: wk }, () => { if (stillHere(nav)) weekAllFlow(pid, wk); });
+  if (NAV !== start) return;
   const p = r.project;
   MANAGING = false;
   const reps = r.reports.slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hant'));
@@ -1067,6 +1142,7 @@ async function weekAllFlow(pid, wk) {
       <div class="stat" style="margin-bottom:6px">${ms.map(m => `<div class="metric"><span>${esc(m.label)}</span><span class="v">${sumOf(m, reps)}</span></div>`).join('')}</div>` : ''}
     <div class="sec-h"><h2>每個人的回報</h2>${reps.length ? '<button class="btn plain small" id="copy-all">全部複製</button>' : ''}</div>
     ${reps.length ? reps.map(x => repCard(p, x, false, false)).join('') : '<p class="empty">這週還沒有人回報。</p>'}`);
+  nav = NAV;
   if ($('copy-all')) $('copy-all').onclick = () => copyText(reps.map(x => reportText(p, x)).join('\n\n'), `已複製 ${reps.length} 則回報`);
   $('back').onclick = () => reportFlow(pid, wk);
   bindRepCards(p, reps, () => weekAllFlow(pid, wk));
@@ -1107,12 +1183,21 @@ function bindRepCards(p, list, after) {
 
 /* ================= 首頁 ================= */
 let PROJECTS = [], TAB = 'mine';
+/** 我是誰＋項目列表，一次向後端拿（少等一次） */
+function loadMe(onFresh) {
+  return apiCached('home', {}, h => { ME = h.me; PROJECTS = h.projects; if (onFresh) onFresh(h); }).then(h => { ME = h.me; PROJECTS = h.projects; return h; });
+}
 async function homeFlow() {
-  view(loading());
+  if (CACHE[ckey('home', {})] === undefined) view(loading());
   document.title = '全時間工作重點回報';
-  PROJECTS = (await api('listProjects')).projects;
-  renderHome();
+  let nav; const start = NAV;
+  await loadMe(() => { if (stillHere(nav) && !TOUR) { renderHome(); nav = NAV; } });
+  if (NAV !== start) return;
+  renderHome(); nav = NAV;
   if (!PARAMS.has('notour') && !PARAMS.get('remind') && DEMO_MODE !== 'admin') maybeStartTour();
+  // 背景先抓進行中項目的填寫頁，以及自己負責項目的統計
+  prefetch([...PROJECTS.filter(p => p.open).slice(0, 6).map(p => ['project', { projectId: p.id, week: '' }]),
+    ...PROJECTS.filter(p => p.canManage).slice(0, 3).map(p => ['projectStats', { projectId: p.id }])]);
 }
 
 function renderHome() {
@@ -1227,7 +1312,7 @@ function editProject(p) {
   });
   if ($('pj-open')) $('pj-open').onclick = async () => {
     const r = await api('setOpen', { projectId: p.id, open: !PD.open }); toast(r.project.open ? '已重新開放回報' : '已停止回報');
-    await reloadProjects(); openProject(p.id, 'week');
+    openProject(p.id, 'week'); // 首頁列表已在背景重抓
   };
   if ($('pj-del')) $('pj-del').onclick = () => armThen($('pj-del'), '確定刪除？所有回報都會刪除，再按一次', async () => {
     await api('deleteProject', { projectId: p.id }); toast('已刪除'); await reloadProjects(); TAB = 'admin'; renderHome();
@@ -1312,24 +1397,27 @@ async function saveProject(isNew, old) {
   try {
     const r = isNew ? await api('createProject', { project: proj }) : await api('updateProject', { projectId: old.id, project: proj });
     toast(isNew ? '已建立，可以把填寫連結或提醒卡發到群組' : '已儲存');
-    await reloadProjects();
+    // 首頁列表已在背景重抓（afterWrite），不用等
     openProject(r.project.id, 'week');
   } catch (e) { toast(e.message); btn.disabled = false; btn.textContent = label; }
 }
 
-async function reloadProjects() { try { PROJECTS = (await api('listProjects')).projects; } catch (e) {} }
+async function reloadProjects() { try { await loadMe(); } catch (e) {} }
 
 /* ================= 管理員：項目詳情 ================= */
 let S = null, PTAB = 'week', SWEEK = null, GROUPBY = '', RANGE = 'all', TREND = '_n';
 
 async function openProject(pid, tab) {
-  view(loading());
-  S = await api('projectStats', { projectId: pid });
+  if (CACHE[ckey('projectStats', { projectId: pid })] === undefined) view(loading());
+  let nav; const start = NAV;
+  const got = await apiCached('projectStats', { projectId: pid }, fresh => { if (S && S.project.id === pid) S = fresh; if (stillHere(nav)) { renderProject(); nav = NAV; } });
+  if (NAV !== start) return;
+  S = got;
   PTAB = tab || 'week';
   if (!SWEEK || !S.weeks.includes(SWEEK)) SWEEK = S.defaultWeek;
   const infos = S.project.fields.filter(f => f.type === 'info');
   if (!infos.some(f => f.id === GROUPBY)) GROUPBY = infos[0] ? infos[0].id : '';
-  renderProject();
+  renderProject(); nav = NAV;
 }
 
 function renderProject() {
@@ -1442,7 +1530,7 @@ function personView(uid) {
     ${missed.length ? `<div class="stat" style="margin-bottom:12px"><h3>沒有回報的週</h3><div class="miss">${missed.map(w => `<span>${weekLabel(w)}</span>`).join('')}</div></div>` : ''}
     ${rs.map((x, i) => repCard(p, x, i === 0, true)).join('') || '<p class="empty">還沒有回報。</p>'}`);
   $('back').onclick = () => { PTAB = 'agg'; renderProject(); };
-  bindRepCards(p, rs, async () => { S = await api('projectStats', { projectId: p.id }); personView(uid); });
+  bindRepCards(p, rs, async () => { S = await apiCached('projectStats', { projectId: p.id }); personView(uid); });
 }
 
 function renderMembersTab() {
