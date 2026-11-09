@@ -14,6 +14,14 @@ let NAV = 0; // 每換一次畫面加 1；背景抓到新資料時，只在使�
 const view = html => { NAV++; $app.innerHTML = html; window.scrollTo(0, 0); };
 const $ = id => document.getElementById(id);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
+/** 載入中的骨架畫面：先把版面排出來，資料到了再填進去 */
+const skeleton = kind => {
+  const bar = (w, h = 14, mt = 10) => `<i class="sk" style="width:${w};height:${h}px;margin-top:${mt}px"></i>`;
+  const card = () => `<div class="sk-card">${bar('60%', 18, 0)}${bar('85%')}${bar('30%', 20)}</div>`;
+  if (kind === 'home') return `${header('全時間工作重點回報')}<nav class="tabs"><button aria-selected="true">我的回報</button><button>…</button></nav><div class="sk-wrap">${card()}${card()}</div>`;
+  if (kind === 'form') return `<div class="subbar"><button class="back" onclick="goHome()">‹ 首頁</button><span></span></div><div class="sk-wrap">${bar('45%', 44, 0)}<div class="sk-card" style="margin-top:14px;border-top:6px solid var(--rule)">${bar('35%', 26, 0)}${bar('70%')}${bar('100%', 48, 18)}${bar('100%', 48)}${bar('40%', 18, 22)}${bar('100%', 44)}${bar('100%', 44)}${bar('100%', 44)}</div></div>`;
+  return `<div class="subbar"><button class="back" onclick="TAB='admin';homeFlow()">‹ 所有項目</button><span></span></div><div class="sk-wrap">${bar('70%', 30, 0)}${bar('100%', 40, 16)}${bar('100%', 48, 16)}<div class="facts three" style="margin-top:12px">${card()}${card()}${card()}</div>${bar('100%', 52, 14)}</div>`;
+};
 const loading = () => `<div class="loading" role="status"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>`;
 const isHttps = u => /^https:\/\//.test(u || '');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -195,6 +203,20 @@ function demoWeeks(p) {
 }
 if (DEMO) window.liff = { isInClient: () => false, closeWindow() {}, isApiAvailable: () => false, getContext: () => null, isLoggedIn: () => true };
 
+/* ---------- LINE 程式庫在背景載入、初始化：有 60 天通行證時，畫面不用等它 ---------- */
+let LIFF_OK = DEMO;
+const LIFF_READY = DEMO ? Promise.resolve() : new Promise((ok, bad) => {
+  if (window.liff) return ok();
+  const sc = document.createElement('script');
+  sc.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
+  sc.onload = ok; sc.onerror = () => bad(new Error('LINE 程式庫載入失敗，請檢查網路'));
+  document.head.append(sc);
+}).then(() => liff.init({ liffId: LIFF_ID })).then(() => { LIFF_OK = true; });
+LIFF_READY.catch(() => {});
+/** 是否在 LINE 裡面打開（LINE 程式庫還沒好時先看瀏覽器資訊） */
+const inClient = () => DEMO ? false : LIFF_OK ? liff.isInClient() : /\bLine\//i.test(navigator.userAgent);
+async function closeLine() { await LIFF_READY.catch(() => {}); if (LIFF_OK) liff.closeWindow(); }
+
 async function demoApi(action, d) {
   await sleep(PARAMS.has('slow') && action !== 'listProjects' ? 1800 : 250); // ?slow 模擬真實後端的速度
   const me = demo.me.userId;
@@ -269,16 +291,17 @@ async function apiRaw(action, data = {}) {
   if (DEMO) { const r = await demoApi(action, data); if (!READS.has(action) && action !== 'uploadImage') afterWrite(data); return JSON.parse(JSON.stringify(r)); }
   const body = { action, ...data };
   const s = action === 'session' ? null : getSession();
-  if (s) body.session = s.token; else body.idToken = liff.getIDToken();
+  if (s) body.session = s.token; else { await LIFF_READY; body.idToken = liff.getIDToken(); }
   const r = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
   const j = await r.json();
   if (!j.ok) {
     if (j.error === 'SESSION_EXPIRED') {
       setSession(null);
+      await LIFF_READY;
       if (liff.isLoggedIn()) return apiRaw(action, data);
       liff.login({ redirectUri: location.href }); throw new Error('登入已過期，正在重新登入');
     }
-    if (j.error === 'TOKEN_EXPIRED') { liff.logout(); liff.login({ redirectUri: location.href }); throw new Error('登入已過期，正在重新登入'); }
+    if (j.error === 'TOKEN_EXPIRED') { await LIFF_READY; liff.logout(); liff.login({ redirectUri: location.href }); throw new Error('登入已過期，正在重新登入'); }
     throw new Error(j.error);
   }
   if (!READS.has(action) && action !== 'session' && action !== 'uploadImage') afterWrite(data);
@@ -338,11 +361,16 @@ let ME = null;
 async function main() {
   try {
     if (PARAMS.has('install')) return installFlow();
-    if (!DEMO) {
-      await liff.init({ liffId: LIFF_ID });
-      PARAMS = new URLSearchParams(location.search); // LIFF 會把 liff.line.me 後面的參數放回網址
-      if (!liff.isLoggedIn() && !getSession()) { liff.login({ redirectUri: location.href }); return; }
-      if (liff.isLoggedIn() && !getSession()) api('session').then(setSession).catch(() => {}); // 不用等，背景建立 60 天通行證
+    // 從 liff.line.me 進來時，參數包在 liff.state 裡：自己先拆開，不用等 LINE 初始化
+    const st = PARAMS.get('liff.state');
+    if (st) { const q = st.includes('?') ? st.slice(st.indexOf('?') + 1) : ''; new URLSearchParams(q).forEach((v, k) => PARAMS.set(k, v)); }
+    if (!DEMO && !getSession()) {
+      // 第一次（或通行證過期）才需要等 LINE 登入
+      if (!ME) view(skeleton('home'));
+      await LIFF_READY;
+      new URLSearchParams(location.search).forEach((v, k) => PARAMS.set(k, v));
+      if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+      api('session').then(setSession).catch(() => {}); // 不用等，背景建立 60 天通行證
     }
     if (PARAMS.has('mydata')) return myDataFlow();
     if (PARAMS.get('all') && PARAMS.get('p')) { loadMe(); return weekAllFlow(PARAMS.get('p'), PARAMS.get('w')); }
@@ -367,7 +395,7 @@ let R = null; // 目前的回報表單 { project, week, weeks, mine, last, profi
 async function reportFlow(pid, wk) {
   MANAGING = false;
   const key = { projectId: pid, week: wk || '' };
-  if (CACHE[ckey('project', key)] === undefined) view(loading());
+  if (CACHE[ckey('project', key)] === undefined) view(skeleton('form'));
   let nav; const start = NAV;
   const show = r => {
     R = r;
@@ -591,7 +619,7 @@ function resultView(rep, justSent, updated, extra = {}) {
     </div>`, `<div class="stamp land" aria-hidden="true">已回報</div>`)}
     <button class="btn send" style="margin-top:18px" id="post-again">發到群組</button>
     <div class="btn-row"><button class="btn plain" id="copy">複製成文字</button><button class="btn plain" id="edit">修改回報</button></div>
-    ${liff.isInClient() ? `<button class="btn plain" style="margin-top:10px" onclick="liff.closeWindow()">回到聊天室</button>` : ''}
+    ${inClient() ? `<button class="btn plain" style="margin-top:10px" onclick="closeLine()">回到聊天室</button>` : ''}
     <button class="btn cancel" id="del-mine" style="margin-top:10px">刪除這週的回報</button>
     <footer class="page-foot"><a class="mydata-link" href="#" id="my-hist">我的回報紀錄</a><a class="mydata-link" href="#" id="week-all">本週大家的回報</a></footer>
   </section>`);
@@ -617,7 +645,8 @@ async function postReport(p, rep, viaPicker) {
   const say = t => { if (note) { note.hidden = false; note.textContent = t; } };
   const msg = reportFlex(p, rep);
   if (DEMO) { say('預覽模式：正式版會在群組貼出你的回報圖卡'); return false; }
-  const ctx = liff.isInClient() ? liff.getContext() : null;
+  await LIFF_READY.catch(() => {});
+  const ctx = LIFF_OK && liff.isInClient() ? liff.getContext() : null;
   const inChat = ctx && ['group', 'room', 'utou'].includes(ctx.type);
   if (inChat && !viaPicker) {
     try {
@@ -635,6 +664,7 @@ async function postReport(p, rep, viaPicker) {
 
 async function pickAndSend(msg, done) {
   if (DEMO) { toast('預覽模式：正式版會在這裡跳出群組選單'); return false; }
+  try { await LIFF_READY; } catch (e) { toast(e.message); return false; }
   if (!liff.isLoggedIn()) { toast('發到群組前需要登入 LINE 一次'); setTimeout(() => liff.login({ redirectUri: location.href }), 600); return false; }
   if (!liff.isApiAvailable('shareTargetPicker')) { toast('無法開啟群組選單，請確認 LIFF 已開啟 Share target picker'); return false; }
   try {
@@ -721,7 +751,7 @@ function loadMe(onFresh) {
   return apiCached('home', {}, h => { ME = h.me; PROJECTS = h.projects; if (onFresh) onFresh(h); }).then(h => { ME = h.me; PROJECTS = h.projects; return h; });
 }
 async function homeFlow() {
-  if (CACHE[ckey('home', {})] === undefined) view(loading());
+  if (CACHE[ckey('home', {})] === undefined) view(skeleton('home'));
   document.title = '全時間工作重點回報';
   let nav; const start = NAV;
   await loadMe(() => { if (stillHere(nav) && !TOUR) { renderHome(); nav = NAV; } });
@@ -941,7 +971,7 @@ async function reloadProjects() { try { await loadMe(); } catch (e) {} }
 let S = null, PTAB = 'week', SWEEK = null, GROUPBY = '', RANGE = 'all', TREND = '_n';
 
 async function openProject(pid, tab) {
-  if (CACHE[ckey('projectStats', { projectId: pid })] === undefined) view(loading());
+  if (CACHE[ckey('projectStats', { projectId: pid })] === undefined) view(skeleton('project'));
   let nav; const start = NAV;
   const got = await apiCached('projectStats', { projectId: pid }, fresh => { if (S && S.project.id === pid) S = fresh; if (stillHere(nav)) { renderProject(); nav = NAV; } });
   if (NAV !== start) return;
@@ -996,7 +1026,7 @@ function renderWeekTab() {
   $('swk').onchange = () => { SWEEK = $('swk').value; renderWeekTab(); };
   $('remind').onclick = () => pickAndSend(remindFlex(p, wk, reps, missing, S.members.length), '已把提醒貼到群組');
   $('copy-link').onclick = () => copyText(reportUrl(p.id), '已複製填寫連結');
-  $('print').onclick = () => { $$('details.rep').forEach(d => d.open = true); setTimeout(() => window.print(), 100); if (!DEMO && liff.isInClient()) toast('LINE 裡面可能無法列印，可改用電腦或手機瀏覽器開啟平台'); };
+  $('print').onclick = () => { $$('details.rep').forEach(d => d.open = true); setTimeout(() => window.print(), 100); if (inClient()) toast('LINE 裡面可能無法列印，可改用電腦或手機瀏覽器開啟平台'); };
   if ($('copy-all')) $('copy-all').onclick = () => copyText(reps.map(x => reportText(p, x)).join('\n\n'), `已複製 ${reps.length} 則回報`);
   bindRepCards(p, reps, () => openProject(p.id, 'week'));
 }
@@ -1246,9 +1276,9 @@ async function forwardFlow(kind, pid, wk, rid) {
   view(`<section class="solo">
     ${ticket({ ...p, title: `${title}`, desc: `${p.title}・${weekLabel(wk)}` }, `<div class="result-msg"><p style="margin-bottom:10px">把這張圖卡轉傳給其他群組或朋友，可以一次勾選好幾個。</p>${html}</div>`)}
     <button class="btn send" style="margin-top:18px" id="go">選擇群組或朋友</button>
-    ${liff.isInClient() ? `<button class="btn plain" style="margin-top:10px" onclick="liff.closeWindow()">回到聊天室</button>` : ''}
+    ${inClient() ? `<button class="btn plain" style="margin-top:10px" onclick="closeLine()">回到聊天室</button>` : ''}
   </section>`);
-  $('go').onclick = async () => { if (await pickAndSend(msg, '已轉傳') && liff.isInClient()) liff.closeWindow(); };
+  $('go').onclick = async () => { if (await pickAndSend(msg, '已轉傳') && inClient()) closeLine(); };
 }
 
 /* ================= 我的資料：查看、修改、刪除 ================= */
@@ -1283,7 +1313,7 @@ async function myDataFlow() {
     const r = await api('deleteMyData');
     setSession(null);
     view(`<section class="solo">${ticket({ title: '已刪除你的資料' }, `<div class="result-msg"><p>已移除你的資料${r.reports ? `和 ${r.reports} 則回報` : ''}。</p></div>`, `<div class="stamp land ink" aria-hidden="true">已刪除</div>`)}
-      ${liff.isInClient() ? `<button class="btn plain" style="margin-top:18px" onclick="liff.closeWindow()">關閉</button>` : ''}</section>`);
+      ${inClient() ? `<button class="btn plain" style="margin-top:18px" onclick="closeLine()">關閉</button>` : ''}</section>`);
   });
 }
 
@@ -1293,8 +1323,8 @@ addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const installUrl = () => `${location.origin}${location.pathname}?install=1`;
-function startInstall() {
-  if (!DEMO && liff.isInClient && liff.isInClient()) { liff.openWindow({ url: installUrl(), external: true }); return; }
+async function startInstall() {
+  if (inClient()) { await LIFF_READY; liff.openWindow({ url: installUrl(), external: true }); return; }
   installFlow();
 }
 function installFlow() {

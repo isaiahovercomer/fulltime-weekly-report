@@ -21,7 +21,10 @@ cat <<'H'
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<link rel="preload" as="script" href="https://static.line-scdn.net/liff/edge/2/sdk.js">
+<link rel="preconnect" href="https://script.google.com">
+<link rel="preconnect" href="https://script.googleusercontent.com">
+<link rel="preconnect" href="https://api.line.me">
 <style>
 H
 cat build/base.css build/extra.css

@@ -110,3 +110,10 @@
   .fcard .check { display: flex; align-items: center; gap: 10px; margin: -2px 0 12px; font-size: 15px; cursor: pointer; }
   .fcard .check input { width: 22px; height: 22px; accent-color: var(--ink); flex: none; }
   .pill.manage { background: var(--ink); color: var(--chrome-fg); padding: 2px 12px; cursor: pointer; }
+
+  /* 載入中的骨架畫面 */
+  .sk-wrap { padding-top: 4px; }
+  .sk { display: block; border-radius: 8px; background: linear-gradient(90deg, var(--sky) 25%, var(--sky-2) 50%, var(--sky) 75%); background-size: 200% 100%; animation: sk 1.2s ease-in-out infinite; }
+  .sk-card { background: var(--paper); border-radius: 16px; padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow); }
+  @keyframes sk { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+  @media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
