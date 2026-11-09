@@ -54,6 +54,7 @@ function doPost(e) {
       case 'me':            out = { ok: true, userId: user.userId, displayName: user.displayName, isAdmin: isAdmin(user.userId), profile: profileOf(user.userId) }; break;
       case 'saveProfile':   out = { ok: true, profile: saveProfile(user, req.name, req.info) }; break;
       case 'listProjects':  out = { ok: true, projects: listProjects(user) }; break;
+      case 'home':          out = { ok: true, me: { userId: user.userId, displayName: user.displayName, isAdmin: isAdmin(user.userId), profile: profileOf(user.userId) }, projects: listProjects(user) }; break;
       case 'project':       out = { ok: true, ...projectForUser(user, req.projectId, req.week) }; break;
       case 'submit':        out = { ok: true, ...submit(user, req.projectId, req.week, req.data) }; break;
       case 'myReports':     out = { ok: true, project: publicProject(req.projectId), reports: reportsOf(req.projectId).filter(r => r.userId === user.userId).sort(byWeekDesc) }; break;
@@ -98,14 +99,22 @@ function createSession(user) {
   });
   return { token, expires: exp.getTime() };
 }
+/** 通行證查詢先找快取（6 小時），找不到才讀「登入」工作表，省下每次讀表的時間 */
 function userFromSession(token) {
+  const cache = CacheService.getScriptCache(), key = 'ss:' + String(token).slice(0, 60);
+  const hit = cache.get(key);
+  if (hit) { const u = JSON.parse(hit); if (u.exp > Date.now()) return { userId: u.userId, displayName: u.displayName }; }
   const data = sessionSheet().getDataRange().getValues(), now = new Date();
-  for (let i = 1; i < data.length; i++) if (data[i][0] === token && data[i][3] instanceof Date && data[i][3] > now) return { userId: String(data[i][1]), displayName: String(data[i][2]) };
+  for (let i = 1; i < data.length; i++) if (data[i][0] === token && data[i][3] instanceof Date && data[i][3] > now) {
+    const u = { userId: String(data[i][1]), displayName: String(data[i][2]) };
+    cache.put(key, JSON.stringify(Object.assign({ exp: data[i][3].getTime() }, u)), 21600);
+    return u;
+  }
   throw new Error('SESSION_EXPIRED');
 }
 function deleteSessionsOf(uid) {
-  const sh = sessionSheet(), data = sh.getDataRange().getValues();
-  for (let i = data.length - 1; i >= 1; i--) if (String(data[i][1]) === uid) sh.deleteRow(i + 1);
+  const sh = sessionSheet(), data = sh.getDataRange().getValues(), cache = CacheService.getScriptCache();
+  for (let i = data.length - 1; i >= 1; i--) if (String(data[i][1]) === uid) { cache.remove('ss:' + String(data[i][0]).slice(0, 60)); sh.deleteRow(i + 1); }
 }
 /** 向 LINE 驗證 ID token，防止有人偽造身分 */
 function verifyIdToken(idToken) {
@@ -122,6 +131,8 @@ function verifyIdToken(idToken) {
 /* ---------- 工具 ---------- */
 function sheet(name) { return SpreadsheetApp.getActive().getSheetByName(name); }
 function rows(name) { const v = sheet(name).getDataRange().getValues(); v.shift(); return v; }
+/** 管理員名單一次請求只讀一次 */
+let ADMIN_IDS = null;
 function fmt(d, p) { return Utilities.formatDate(d, CONFIG.TZ, p || 'yyyy/MM/dd HH:mm'); }
 function parseJson(s, fb) { try { return JSON.parse(s); } catch (e) { return fb; } }
 function isTrue(v) { return v === true || String(v).toUpperCase() === 'TRUE'; }
@@ -158,7 +169,7 @@ function weeksOf(p) {
 }
 
 /* ---------- 管理員 ---------- */
-function isAdmin(uid) { return rows(SH.ADMINS).some(r => String(r[0]).trim() === uid); }
+function isAdmin(uid) { if (!ADMIN_IDS) ADMIN_IDS = rows(SH.ADMINS).map(r => String(r[0]).trim()); return ADMIN_IDS.indexOf(uid) >= 0; }
 /** 「建立者」欄存「LINE名稱 (userId)」 */
 function ownerOf(r) { const m = /\((U[0-9a-f]+)\)\s*$/.exec(String(r[PJ.CREATOR] || '')); return m ? m[1] : ''; }
 function canManage(uid, pid) { return isAdmin(uid) || ownerOf(findProjectRow(pid).r) === uid; }
